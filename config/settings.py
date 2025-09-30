@@ -23,7 +23,7 @@ PROFILE = "default_profile"  # Options: "default_profile"
 BASE_DIR = Path(__file__).parent.parent.resolve()
 
 # API Configuration (for backward compatibility)
-GENERATION_MODEL = "gemini-1.5-flash"
+GENERATION_MODEL = "gemini-2.5-flash"
 API_PORT = 8000
 
 @dataclass
