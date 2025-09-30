@@ -207,10 +207,6 @@ Key guidelines:
 Available columns: ID, CUSTOMER_ID, FRIDGE_MODEL, BRAND, CAPACITY_LITERS, PRICE, SALES_DATE, STORE_NAME, STORE_ADDRESS, CUSTOMER_FEEDBACK
 """
     
-    def get_llm_model(self) -> str:
-        """Get the LLM model name."""
-        return "gemini-2.5-flash"
-    
     def create_sources_from_df(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Create sources list from DataFrame for response building."""
         sources = []
