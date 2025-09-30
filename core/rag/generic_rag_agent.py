@@ -44,7 +44,7 @@ class GenericRAGAgent:
         if provider_config is None:
             # Resolve from active profile to avoid leaking provider details here
             try:
-                from config.settings import PROFILE
+                from config.base_config import PROFILE
                 from config.profiles.profile_factory import ProfileFactory
                 profile = ProfileFactory.create_profile(PROFILE)
                 provider_config = profile.get_provider_config()
@@ -71,7 +71,8 @@ class GenericRAGAgent:
         self.vectorstore = GenericVectorStore(
             persist_directory=self.config.vector_store_path,
             embeddings=self.embeddings,
-            collection_name=self.collection_name
+            collection_name=self.collection_name,
+            vector_store_type=self.config.vector_store_type
         )
         
         # Load and process data

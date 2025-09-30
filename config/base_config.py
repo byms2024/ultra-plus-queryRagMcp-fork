@@ -12,19 +12,55 @@ from .profiles.profile_factory import ProfileFactory
 from .profiles.base_profile import BaseProfile
 
 # =============================================================================
-# PROFILE SELECTION - Change this to switch between profiles
+# CONSTANTS - Default configuration values that can be overridden by profiles
 # =============================================================================
-PROFILE = "default_profile"  # Options: "default_profile"
+
+# Profile Selection
+PROFILE = "default_profile"  # Options: "default_profile", "customized_profile"
+
+# LLM Configuration
+DEFAULT_GENERATION_MODEL = "gemini-2.5-flash"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-004"
+DEFAULT_TEMPERATURE = 0.1
+DEFAULT_MAX_TOKENS = 4000
+
+# Vector Store Configuration
+DEFAULT_VECTOR_STORE_TYPE = "chroma"  # Options: "chroma", "faiss"
+DEFAULT_CHUNK_SIZE = 1000
+DEFAULT_CHUNK_OVERLAP = 200
+
+# RAG Configuration
+DEFAULT_TOP_K = 50
+DEFAULT_MAX_ITERATIONS = 10
+
+# API Configuration
+DEFAULT_API_PORT = 8000
+DEFAULT_MCP_PORT = 7800
+
+# Data Configuration
+DEFAULT_SAMPLE_SIZE = None
+
+# Logging Configuration
+DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_LOG_TO_FILE = True
+DEFAULT_LOG_TO_CONSOLE = True
+DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+DEFAULT_BACKUP_COUNT = 5
+
+# LangSmith Configuration (Optional)
+DEFAULT_LANGSMITH_API_KEY = None
+DEFAULT_LANGSMITH_PROJECT = "generic-rag-system"
+DEFAULT_ENABLE_TRACING = False
+
+# API Configuration (for backward compatibility)
+GENERATION_MODEL = DEFAULT_GENERATION_MODEL
+API_PORT = DEFAULT_API_PORT
 
 # =============================================================================
 # SYSTEM CONFIGURATION
 # =============================================================================
 
 BASE_DIR = Path(__file__).parent.parent.resolve()
-
-# API Configuration (for backward compatibility)
-GENERATION_MODEL = "gemini-2.5-flash"
-API_PORT = 8000
 
 @dataclass
 class Config:
@@ -42,42 +78,42 @@ class SystemConfig:
     profile_name: str = PROFILE
     
     # LLM Settings
-    generation_model: str = "gemini-1.5-flash"
-    embedding_model: str = "gemini-embedding-001"
-    temperature: float = 0.1
-    max_tokens: int = 4000
+    generation_model: str = DEFAULT_GENERATION_MODEL
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL
+    temperature: float = DEFAULT_TEMPERATURE
+    max_tokens: int = DEFAULT_MAX_TOKENS
     
     # Google API Key (now loaded from profile-specific config_api_keys.py)
     google_api_key: str = "PLACEHOLDER"  # This will be overridden by profile-specific config
     
     # Vector Store Settings
-    vector_store_type: str = "chroma"
+    vector_store_type: str = DEFAULT_VECTOR_STORE_TYPE
     vector_store_path: str = str(BASE_DIR / "storage" / "vector_store")
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
     
     # RAG Settings
-    top_k: int = 50
-    max_iterations: int = 10
+    top_k: int = DEFAULT_TOP_K
+    max_iterations: int = DEFAULT_MAX_ITERATIONS
     
     # API Settings
-    api_port: int = 8000
-    mcp_port: int = 7800
+    api_port: int = DEFAULT_API_PORT
+    mcp_port: int = DEFAULT_MCP_PORT
     
     # Data Settings
-    sample_size: Optional[int] = None
+    sample_size: Optional[int] = DEFAULT_SAMPLE_SIZE
     
     # Optional: LangSmith
-    langsmith_api_key: Optional[str] = None
-    langsmith_project: str = "generic-rag-system"
-    enable_tracing: bool = False
+    langsmith_api_key: Optional[str] = DEFAULT_LANGSMITH_API_KEY
+    langsmith_project: str = DEFAULT_LANGSMITH_PROJECT
+    enable_tracing: bool = DEFAULT_ENABLE_TRACING
     
     # Logging Settings
-    log_level: str = "INFO"
-    log_to_file: bool = True
-    log_to_console: bool = True
-    max_file_size: int = 10 * 1024 * 1024  # 10MB
-    backup_count: int = 5
+    log_level: str = DEFAULT_LOG_LEVEL
+    log_to_file: bool = DEFAULT_LOG_TO_FILE
+    log_to_console: bool = DEFAULT_LOG_TO_CONSOLE
+    max_file_size: int = DEFAULT_MAX_FILE_SIZE
+    backup_count: int = DEFAULT_BACKUP_COUNT
 
 
 def load_config() -> Config:
@@ -101,8 +137,65 @@ def load_profile(config: Config) -> 'DataProfile':
         return ProfileFactory.get_default_profile()
 
 def load_system_config() -> SystemConfig:
-    """Load system configuration."""
-    return SystemConfig()
+    """Load system configuration with profile overrides."""
+    # Start with default configuration
+    config = SystemConfig()
+    
+    # Try to get profile-specific overrides
+    try:
+        profile = ProfileFactory.create_profile(config.profile_name)
+        
+        # Override with profile-specific constants if they exist
+        profile_module = __import__(f"config.profiles.{profile.profile_name}.profile_config", fromlist=[profile.__class__.__name__])
+        profile_class = getattr(profile_module, profile.__class__.__name__)
+        
+        # Check for profile-specific constants
+        if hasattr(profile_class, 'CONSTANTS'):
+            constants = profile_class.CONSTANTS
+            
+            # Override system config with profile constants
+            if hasattr(constants, 'GENERATION_MODEL'):
+                config.generation_model = constants.GENERATION_MODEL
+            if hasattr(constants, 'EMBEDDING_MODEL'):
+                config.embedding_model = constants.EMBEDDING_MODEL
+            if hasattr(constants, 'TEMPERATURE'):
+                config.temperature = constants.TEMPERATURE
+            if hasattr(constants, 'MAX_TOKENS'):
+                config.max_tokens = constants.MAX_TOKENS
+            if hasattr(constants, 'VECTOR_STORE_TYPE'):
+                config.vector_store_type = constants.VECTOR_STORE_TYPE
+            if hasattr(constants, 'CHUNK_SIZE'):
+                config.chunk_size = constants.CHUNK_SIZE
+            if hasattr(constants, 'CHUNK_OVERLAP'):
+                config.chunk_overlap = constants.CHUNK_OVERLAP
+            if hasattr(constants, 'TOP_K'):
+                config.top_k = constants.TOP_K
+            if hasattr(constants, 'MAX_ITERATIONS'):
+                config.max_iterations = constants.MAX_ITERATIONS
+            if hasattr(constants, 'API_PORT'):
+                config.api_port = constants.API_PORT
+            if hasattr(constants, 'MCP_PORT'):
+                config.mcp_port = constants.MCP_PORT
+            if hasattr(constants, 'SAMPLE_SIZE'):
+                config.sample_size = constants.SAMPLE_SIZE
+            if hasattr(constants, 'LOG_LEVEL'):
+                config.log_level = constants.LOG_LEVEL
+            if hasattr(constants, 'LOG_TO_FILE'):
+                config.log_to_file = constants.LOG_TO_FILE
+            if hasattr(constants, 'LOG_TO_CONSOLE'):
+                config.log_to_console = constants.LOG_TO_CONSOLE
+            if hasattr(constants, 'LANGSMITH_API_KEY'):
+                config.langsmith_api_key = constants.LANGSMITH_API_KEY
+            if hasattr(constants, 'LANGSMITH_PROJECT'):
+                config.langsmith_project = constants.LANGSMITH_PROJECT
+            if hasattr(constants, 'ENABLE_TRACING'):
+                config.enable_tracing = constants.ENABLE_TRACING
+                
+    except Exception as e:
+        # If profile override fails, continue with default config
+        pass
+    
+    return config
 
 
 def get_profile() -> BaseProfile:

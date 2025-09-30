@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from config.settings import load_system_config, get_profile
+from config.base_config import load_system_config, get_profile
 from config.logging_config import get_logger, log_system_info
 from core.unified_engine import UnifiedQueryEngine
 from reports.generic_report_builder import generate_report_from_question, ReportConfig

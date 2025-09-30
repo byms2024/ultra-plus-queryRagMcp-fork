@@ -24,7 +24,7 @@ from mcp.types import (
     EmbeddedResource,
 )
 
-from config.settings import load_system_config, get_profile
+from config.base_config import load_system_config, get_profile
 from config.logging_config import get_logger
 from core.unified_engine import UnifiedQueryEngine
 

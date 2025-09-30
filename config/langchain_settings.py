@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 # Import the new configuration system
-from .settings import (
+from .base_config import (
     load_system_config, 
     get_profile, 
     get_data_file_path,

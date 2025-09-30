@@ -18,7 +18,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.unified_engine import UnifiedQueryEngine
-from config.settings import Config, load_config
+from config.base_config import Config, load_config
 from config.profiles import DataProfile, ProfileFactory
 from config.logging_config import get_logger
 

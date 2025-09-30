@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 from typing import Optional, Dict, Any, List
-from config.settings import Config
+from config.base_config import Config
 from config.profiles import DataProfile
 from config.logging_config import get_rag_logger
 from ..utils.time_utils import SmartDateHandler

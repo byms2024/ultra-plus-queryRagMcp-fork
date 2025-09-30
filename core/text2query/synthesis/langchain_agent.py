@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 from config.logging_config import get_logger
-from config.settings import Config
+from config.base_config import Config
 from config.profiles import DataProfile
 from ..data import build_schema_description, validate_dataframe_for_langchain
 from config.providers.registry import LLMFactory

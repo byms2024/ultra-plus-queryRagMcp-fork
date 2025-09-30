@@ -289,7 +289,7 @@ cp config/profiles/default_profile/tests/test_*.py config/profiles/your_profile_
 
 Switching between profiles is straightforward and follows this process:
 
-1. **Update Configuration**: Change the profile name in `config/settings.py`
+1. **Update Configuration**: Change the profile name in `config/base_config.py`
 2. **Profile Loading**: The system automatically loads the new profile configuration
 3. **Data Loading**: New data and schema are loaded from the profile directory
 4. **Engine Update**: The unified engine is updated with the new configuration
@@ -299,7 +299,7 @@ This process ensures seamless switching between different datasets and configura
 
 #### Switch Profiles
 ```python
-# In config/settings.py
+# In config/base_config.py
 PROFILE = "your_profile_name"  # Change this line
 
 # Restart the server
@@ -327,7 +327,7 @@ export PROFILE_NAME=default_profile
 
 #### Main Settings
 ```python
-# config/settings.py
+# config/base_config.py
 PROFILE = "default_profile"  # Active profile
 GENERATION_MODEL = "gemini-1.5-flash"
 API_PORT = 8000

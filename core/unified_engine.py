@@ -13,7 +13,7 @@ import pandas as pd
 import time
 from datetime import datetime
 
-from config.settings import load_system_config, get_profile
+from config.base_config import load_system_config, get_profile
 from config.logging_config import get_logger
 from core.text2query.engine import QuerySynthesisEngine
 from core.rag.generic_rag_agent import GenericRAGAgent
@@ -80,7 +80,7 @@ class UnifiedQueryEngine:
         """Initialize both Text2Query and RAG engines."""
         try:
             # Initialize Text2Query engine
-            from config.settings import Config
+            from config.base_config import Config
             text2query_config = Config(
                 google_api_key="PLACEHOLDER",  # Will be loaded from profile
                 generation_model=self.config.generation_model,

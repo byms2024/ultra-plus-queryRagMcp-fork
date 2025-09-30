@@ -11,6 +11,48 @@ from ..base_profile import BaseProfile, ColumnDefinition, SensitizationRule, Doc
 from core.rag.generic_data_processor import DataSchema
 from reports.generic_report_builder import ReportConfig
 
+# =============================================================================
+# CONSTANTS - Profile-specific configuration overrides
+# Uncomment and modify these to override the default values from base_config.py
+# =============================================================================
+
+class CONSTANTS:
+    """Profile-specific configuration constants that override base defaults."""
+    
+    # LLM Configuration Overrides
+    # GENERATION_MODEL = "gemini-2.5-flash"  # Override default generation model
+    # EMBEDDING_MODEL = "text-embedding-004"  # Override default embedding model
+    # TEMPERATURE = 0.2  # Override default temperature
+    # MAX_TOKENS = 2048  # Override default max tokens
+    
+    # Vector Store Configuration Overrides
+    # VECTOR_STORE_TYPE = "chroma"  # Override default vector store type (chroma/faiss)
+    # CHUNK_SIZE = 1000  # Override default chunk size
+    # CHUNK_OVERLAP = 200  # Override default chunk overlap
+    
+    # RAG Configuration Overrides
+    # TOP_K = 50  # Override default top_k for retrieval
+    # MAX_ITERATIONS = 10  # Override default max iterations
+    
+    # API Configuration Overrides
+    # API_PORT = 8000  # Override default API port
+    # MCP_PORT = 7800  # Override default MCP port
+    
+    # Data Configuration Overrides
+    # SAMPLE_SIZE = None  # Override default sample size (None for no limit)
+    
+    # Logging Configuration Overrides
+    # LOG_LEVEL = "INFO"  # Override default log level
+    # LOG_TO_FILE = True  # Override default log to file setting
+    # LOG_TO_CONSOLE = True  # Override default log to console setting
+    
+    # LangSmith Configuration Overrides
+    # LANGSMITH_API_KEY = None  # Override default LangSmith API key
+    # LANGSMITH_PROJECT = "default-profile-rag"  # Override default LangSmith project
+    # ENABLE_TRACING = False  # Override default tracing setting
+    
+    pass  # Remove this line when adding actual overrides
+
 
 class DefaultProfile(BaseProfile):
     """Default profile for generic data processing."""

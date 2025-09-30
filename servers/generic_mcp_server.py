@@ -39,7 +39,7 @@ async def generate_report(question: str, ctx: Context) -> Dict[str, Any]:
 
     try:
         # Get active profile and its configuration
-        from config.settings import PROFILE
+        from config.base_config import PROFILE
         profile = ProfileFactory.create_profile(PROFILE)
         data_schema = profile.get_data_schema()
         report_config = profile.get_report_config()
@@ -82,7 +82,7 @@ async def ask_question(question: str, ctx: Context) -> Dict[str, Any]:
 
     try:
         # Get active profile and initialize RAG agent
-        from config.settings import PROFILE
+        from config.base_config import PROFILE
         profile = ProfileFactory.create_profile(PROFILE)
         data_schema = profile.get_data_schema()
         provider_config = profile.get_provider_config()
@@ -122,7 +122,7 @@ async def search_data(query: str, ctx: Context, top_k: int = 5) -> Dict[str, Any
 
     try:
         # Get active profile and initialize RAG agent
-        from config.settings import PROFILE
+        from config.base_config import PROFILE
         profile = ProfileFactory.create_profile(PROFILE)
         data_schema = profile.get_data_schema()
         provider_config = profile.get_provider_config()
@@ -161,7 +161,7 @@ async def get_stats(ctx: Context) -> Dict[str, Any]:
 
     try:
         # Get active profile and initialize RAG agent
-        from config.settings import PROFILE
+        from config.base_config import PROFILE
         profile = ProfileFactory.create_profile(PROFILE)
         data_schema = profile.get_data_schema()
         
@@ -197,7 +197,7 @@ async def get_profile_info(ctx: Context) -> Dict[str, Any]:
         await ctx.info("Getting profile information")  # type: ignore[attr-defined]
 
     try:
-        from config.settings import PROFILE
+        from config.base_config import PROFILE
         profile = ProfileFactory.create_profile(PROFILE)
         data_schema = profile.get_data_schema()
         

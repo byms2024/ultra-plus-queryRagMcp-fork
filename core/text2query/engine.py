@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, Union, List
 import pandas as pd
 import time
 
-from config.settings import Config, load_profile
+from config.base_config import Config, load_profile
 from config.logging_config import get_rag_logger
 from config.profiles import DataProfile
 from censor_utils.censoring import CensoringService
