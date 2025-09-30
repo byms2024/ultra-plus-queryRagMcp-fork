@@ -25,13 +25,13 @@ class DefaultProfile(BaseProfile):
         self.locale = "en_US"
         
         # File paths
-        self.data_file_path = str(Path(__file__).parent / "test_data" / "fridge_sales_without_rating.csv")
+        self.data_file_path = str(Path(__file__).parent / "test_data" / "fridge_sales_with_rating.csv")
         self.test_data_path = str(Path(__file__).parent / "test_data")
         
         # Define required columns for fridge sales data
         self.required_columns = [
             'ID', 'CUSTOMER_ID', 'FRIDGE_MODEL', 'BRAND', 'CAPACITY_LITERS', 
-            'PRICE', 'SALES_DATE', 'STORE_NAME', 'STORE_ADDRESS', 'CUSTOMER_FEEDBACK'
+            'PRICE', 'SALES_DATE', 'STORE_NAME', 'STORE_ADDRESS', 'CUSTOMER_FEEDBACK', 'FEEDBACK_RATING'
         ]
         
         # Define column definitions
@@ -45,7 +45,8 @@ class DefaultProfile(BaseProfile):
             'SALES_DATE': ColumnDefinition('SALES_DATE', 'datetime', True, "Sales Date"),
             'STORE_NAME': ColumnDefinition('STORE_NAME', 'string', True, "Store Name"),
             'STORE_ADDRESS': ColumnDefinition('STORE_ADDRESS', 'string', True, "Store Address"),
-            'CUSTOMER_FEEDBACK': ColumnDefinition('CUSTOMER_FEEDBACK', 'string', True, "Customer Feedback", text_field=True)
+            'CUSTOMER_FEEDBACK': ColumnDefinition('CUSTOMER_FEEDBACK', 'string', True, "Customer Feedback", text_field=True),
+            'FEEDBACK_RATING': ColumnDefinition('FEEDBACK_RATING', 'string', True, "Feedback Rating")
         }
         
         # Define text columns
@@ -53,6 +54,9 @@ class DefaultProfile(BaseProfile):
         
         # Define sensitive columns
         self.sensitive_columns = ['CUSTOMER_ID']
+        
+        # Define date columns
+        self.date_columns = ['SALES_DATE']
         
         # Define sensitization rules (none by default)
         self.sensitization_rules = {}
@@ -165,6 +169,69 @@ class DefaultProfile(BaseProfile):
             display_columns=['ID', 'CUSTOMER_ID', 'FRIDGE_MODEL', 'BRAND', 'CAPACITY_LITERS', 'PRICE', 'SALES_DATE', 'STORE_NAME', 'CUSTOMER_FEEDBACK'],
             max_rows=500
         )
+    
+    def get_censoring_mappings(self) -> Dict[str, str]:
+        """Get censoring mappings for sensitive data."""
+        return {}
+    
+    def get_schema_hints(self, sample_data: str) -> str:
+        """Get schema hints for the data."""
+        return f"""
+Schema hints for fridge sales data:
+- ID: Unique identifier for each record
+- CUSTOMER_ID: Customer identifier (sensitive)
+- FRIDGE_MODEL: Model name of the fridge
+- BRAND: Brand of the fridge (e.g., Samsung, GE, KitchenAid)
+- CAPACITY_LITERS: Storage capacity in liters
+- PRICE: Price of the fridge in dollars
+- SALES_DATE: Date when the sale occurred
+- STORE_NAME: Name of the store where the sale occurred
+- STORE_ADDRESS: Address of the store
+- CUSTOMER_FEEDBACK: Customer feedback text
+"""
+    
+    def get_llm_system_prompt(self) -> str:
+        """Get system prompt for LLM interactions."""
+        return """
+You are a data analysis assistant for fridge sales data.
+Your role is to help users analyze fridge sales information by generating appropriate pandas code.
+
+Key guidelines:
+1. Always use the DataFrame 'df' as your data source
+2. Be precise with column names and data types
+3. Handle dates properly using pandas datetime functions
+4. Provide clear, executable pandas code
+5. Include comments explaining your analysis steps
+6. Return results in a format that's easy to understand
+
+Available columns: ID, CUSTOMER_ID, FRIDGE_MODEL, BRAND, CAPACITY_LITERS, PRICE, SALES_DATE, STORE_NAME, STORE_ADDRESS, CUSTOMER_FEEDBACK
+"""
+    
+    def get_llm_model(self) -> str:
+        """Get the LLM model name."""
+        return "gemini-2.5-flash"
+    
+    def create_sources_from_df(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Create sources list from DataFrame for response building."""
+        sources = []
+        for idx, row in df.iterrows():
+            source = {
+                "content": str(row.get('CUSTOMER_FEEDBACK', '')),
+                "metadata": {
+                    "id": str(row.get('ID', idx)),
+                    "brand": str(row.get('BRAND', '')),
+                    "price": str(row.get('PRICE', '')),
+                    "fridge_model": str(row.get('FRIDGE_MODEL', '')),
+                    "store_name": str(row.get('STORE_NAME', '')),
+                    "store_address": str(row.get('STORE_ADDRESS', '')),
+                    "capacity_liters": str(row.get('CAPACITY_LITERS', '')),
+                    "sales_date": str(row.get('SALES_DATE', '')),
+                    "feedback_rating": str(row.get('FEEDBACK_RATING', '')),
+                    "score": float(row.get('PRICE', 0))
+                }
+            }
+            sources.append(source)
+        return sources
 
     def get_provider_config(self):
         """Delegate to provider_config module for provider settings."""

@@ -55,10 +55,12 @@ class QuerySynthesizer:
                 "Return only JSON matching the schema."
             )
 
-            raw_text = self.llm_provider.generate_content(
-                model=self.profile.get_llm_model(),
-                contents=[system_rules + "\n" + schema_hint + "\n" + prompt]
-            )
+            response = self.llm_provider.invoke(system_rules + "\n" + schema_hint + "\n" + prompt)
+            # Handle LangChain response format
+            if hasattr(response, 'content'):
+                raw_text = response.content
+            else:
+                raw_text = str(response)
             json_str_extracted = self.extract_json_from_text(raw_text)
             json_str = json_str_extracted if isinstance(json_str_extracted, str) and json_str_extracted.strip() else raw_text
             if not json_str.strip():

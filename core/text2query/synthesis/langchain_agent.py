@@ -97,7 +97,7 @@ class LangChainAgentEngine:
         """Build a context-aware query for the agent."""
         try:
             # Build schema description
-            schema_description = build_schema_description(df, self.profile, include_sample=True, sample_rows=2)
+            schema_description = build_schema_description(df, self.profile)
             
             # Get profile-specific context
             profile_context = self._get_profile_context()

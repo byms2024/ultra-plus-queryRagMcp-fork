@@ -6,7 +6,7 @@ import chromadb
 from chromadb.config import Settings
 from langchain.schema import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 from config.logging_config import get_logger
 

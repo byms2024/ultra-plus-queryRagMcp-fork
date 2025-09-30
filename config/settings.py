@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).parent.parent.resolve()
 
 # API Configuration (for backward compatibility)
 GENERATION_MODEL = "gemini-1.5-flash"
-API_PORT = 7788
+API_PORT = 8000
 
 @dataclass
 class Config:
@@ -61,7 +61,7 @@ class SystemConfig:
     max_iterations: int = 10
     
     # API Settings
-    api_port: int = 7788
+    api_port: int = 8000
     mcp_port: int = 7800
     
     # Data Settings

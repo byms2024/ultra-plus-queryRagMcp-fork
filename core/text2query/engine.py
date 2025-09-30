@@ -241,9 +241,11 @@ class QuerySynthesisEngine:
             # Execute the query based on its type
             if query_spec.get("query_type") in ["langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent"]:
                 # LangChain methods return results directly
+                response = self.response_builder.build_response(query_spec.get("result"), query_spec)
                 return {
-                    "answer": self.response_builder.build_response(query_spec.get("result"), query_spec),
-                    "sources": self._create_sources_from_result(query_spec.get("result")),
+                    "answer": response.get("answer", ""),
+                    "sources": response.get("sources", []),
+                    "confidence": response.get("confidence", "medium"),
                     "stats": self._generate_stats_from_result(query_spec.get("result")),
                     "method": query_spec.get("synthesis_method", method),
                     "execution_time": query_spec.get("execution_time", 0)
@@ -253,9 +255,11 @@ class QuerySynthesisEngine:
                 executor = QueryExecutor(self.profile)
                 df_result = executor.apply(self.df, query_spec)
                 
+                response = self.response_builder.build_response(df_result, query_spec)
                 return {
-                    "answer": self.response_builder.build_response(df_result, query_spec),
-                    "sources": self._create_sources_from_result(df_result),
+                    "answer": response.get("answer", ""),
+                    "sources": response.get("sources", []),
+                    "confidence": response.get("confidence", "medium"),
                     "stats": self._generate_stats_from_result(df_result),
                     "method": query_spec.get("synthesis_method", method),
                     "execution_time": query_spec.get("execution_time", 0)

@@ -27,12 +27,12 @@ class DataManager:
         """Load CSV data, validate columns, and apply enhanced data cleaning."""
         try:
             # Load CSV data
-            csv_file = self.profile.get_csv_file_path()
+            csv_file = self.profile.get_data_file_path()
             df = pd.read_csv(csv_file)
             logger.info(f"Loaded CSV with {len(df)} rows and {len(df.columns)} columns")
             
             # Validate required columns
-            missing = self.profile.validate_columns(df)
+            missing = self.profile.validate_schema(df.columns.tolist())
             if missing:
                 raise ValueError(f"CSV missing required columns: {missing}")
             
@@ -213,7 +213,7 @@ def validate_dataframe_for_langchain(df: pd.DataFrame, profile: DataProfile) -> 
     
     # Check for missing required columns
     try:
-        missing_columns = profile.validate_columns(df)
+        missing_columns = profile.validate_schema(df.columns.tolist())
         if missing_columns:
             validation_results["warnings"].append(f"Missing required columns: {missing_columns}")
             validation_results["recommendations"].append("Ensure all required columns are present")

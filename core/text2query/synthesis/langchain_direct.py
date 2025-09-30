@@ -50,7 +50,7 @@ class LangChainQuerySynthesizer:
         """
         try:
             # Step 1: Build schema context using our enhanced system
-            schema_description = build_schema_description(df, self.profile, include_sample=True, sample_rows=3)
+            schema_description = build_schema_description(df, self.profile)
             
             # Step 2: Get profile-specific system prompt and schema hints
             system_prompt = self._build_system_prompt()
@@ -65,7 +65,7 @@ class LangChainQuerySynthesizer:
             )
             
             # Step 5: Generate pandas code using LangChain
-            response = self.llm_provider.generate_content([full_prompt])
+            response = self.llm_provider.invoke(full_prompt)
             code = self._extract_code_from_response(response)
             
             logger.debug(f"Generated pandas code: {code}")
@@ -173,11 +173,16 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
         
         return "\n".join(filter(None, prompt_parts))
     
-    def _extract_code_from_response(self, response: str) -> str:
+    def _extract_code_from_response(self, response) -> str:
         """Extract pandas code from LLM response."""
         try:
-            # Clean up the response
-            code = response.strip()
+            # Handle LangChain response format
+            if hasattr(response, 'content'):
+                code = response.content.strip()
+            elif isinstance(response, str):
+                code = response.strip()
+            else:
+                code = str(response).strip()
             
             # Remove markdown code blocks if present
             if code.startswith("```") and code.endswith("```"):

@@ -217,7 +217,7 @@ Answer:"""
             logger.info(f"Answering question: {question}")
             
             # Use QA chain
-            result = self.qa_chain({"query": question})
+            result = self.qa_chain.invoke({"query": question})
             
             # Extract sources
             sources = []

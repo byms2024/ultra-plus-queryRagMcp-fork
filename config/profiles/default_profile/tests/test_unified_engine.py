@@ -85,7 +85,7 @@ def mock_profile():
     # Add methods that might be called by the unified engine
     profile.get_data_schema.return_value = Mock()
     profile.get_provider_config.return_value = Mock()
-    profile.get_csv_file_path.return_value = str(Path(__file__).parent / "test_data" / "fridge_sales_basic.csv")
+    profile.get_data_file_path.return_value = str(Path(__file__).parent / "test_data" / "fridge_sales_basic.csv")
     
     return profile
 
