@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
 import hashlib
+import pandas as pd
 
 
 @dataclass
