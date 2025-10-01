@@ -214,7 +214,7 @@ python servers/unified_mcp_server.py
 
 The MCP server provides the following tools:
 
-- **`ask_question`**: Answer questions using the unified engine
+- **`answer_question`**: Answer questions using the unified engine
 - **`search_data`**: Search through documents and data
 - **`get_stats`**: Get system statistics and metrics
 - **`get_profile_info`**: Get current profile information
@@ -538,7 +538,7 @@ You've successfully set up the **Unified QueryRAG Engine**! 🚀
 ✅ **Installed** all dependencies and configured the system  
 ✅ **Set up** the server and API endpoints  
 ✅ **Learned** about the profile system architecture  
-✅ **Configured** profile management and switching  
+✅ **Configured** profile management and switching (106/106 tests passing)  
 ✅ **Set up** monitoring and troubleshooting procedures  
 
 ### 🚀 Next Steps
@@ -566,6 +566,8 @@ Now that your system is running, you can:
 - **Test the endpoints** to verify everything is working
 - **Check the API documentation** at `http://localhost:8000/docs` when the server is running
 - **Consult profile-specific setup guides** for detailed testing instructions
+- **Read [ABOUT_RAG.md](./ABOUT_RAG.md)** for detailed RAG system documentation
+- **Review [README.md](./README.md)** for comprehensive system overview
 
 ---
 

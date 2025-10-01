@@ -111,6 +111,9 @@ class CustomizedProfile(BaseProfile):
         # Define sensitive columns (extracted from original hardcoded logic)
         self.sensitive_columns = ['VIN', 'DEALER_CODE', 'SUB_DEALER_CODE']
         
+        # Define date columns (extracted from original hardcoded logic)
+        self.date_columns = ['CREATE_DATE']
+        
         # Define sensitization rules (extracted from original hardcoded logic)
         self.sensitization_rules = {
             'VIN': SensitizationRule('VIN', 'VIN', 8),

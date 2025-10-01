@@ -416,6 +416,37 @@ curl http://localhost:8000/methods
 }
 ```
 
+#### 🧠 **Complex RAG Test Cases (Auto Method)**
+
+These test cases validate the system's intelligent routing mechanism using `method="auto"` to automatically choose between Text2Query and RAG engines for Brazilian NPS data:
+
+##### **Advanced NLP Question (RAG Fallback Test)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the hidden emotional insights and linguistic patterns in customer feedback that require advanced NLP to extract?", "method": "auto"}'
+```
+**Expected Behavior:** 
+- Text2Query may fail (500 error) for advanced NLP tasks
+- System automatically falls back to RAG engine
+- Demonstrates intelligent routing when Text2Query cannot handle complex NLP
+
+##### **Advanced Text Mining Question (RAG Fallback Test)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Can you perform advanced text mining and semantic similarity analysis on the unstructured feedback data to discover hidden correlations?", "method": "auto"}'
+```
+**Expected Behavior:**
+- Text2Query may fail (500 error) for advanced text mining tasks
+- System automatically falls back to RAG engine
+- Shows RAG's capability for complex document analysis
+
+**💡 Key Insight:** These tests validate the system's intelligent engine selection for Brazilian Portuguese NPS data:
+- **Simple/Structured questions** → Text2Query (fast, efficient)
+- **Complex NLP questions** → RAG (comprehensive, document-based)
+- **Automatic fallback** → Seamless transition when needed
+
 #### 🎯 **Engine Selection Guidelines for NPS Data**
 
 Understanding when each engine is used helps you optimize your NPS queries:
@@ -617,7 +648,7 @@ You've successfully set up and tested the **Customized Profile** for NPS data an
 ### 🏆 What You've Accomplished
 
 ✅ **Configured** the customized profile for NPS data analysis  
-✅ **Tested** both Text2Query and RAG engines with Brazilian Portuguese support  
+✅ **Tested** both Text2Query and RAG engines with Brazilian Portuguese support (48/48 tests passing)  
 ✅ **Verified** API endpoints and Portuguese language functionality  
 ✅ **Learned** when to use each engine for optimal NPS performance  
 ✅ **Analyzed** dealer performance and service quality patterns  

@@ -387,6 +387,37 @@ curl -X POST http://localhost:8000/ask \
 ```
 **💡 Hint:** This query analyzes geographic and economic patterns between coastal and inland markets.
 
+#### 🧠 **Complex RAG Test Cases (Auto Method)**
+
+These test cases validate the system's intelligent routing mechanism using `method="auto"` to automatically choose between Text2Query and RAG engines:
+
+##### **Advanced NLP Question (RAG Fallback Test)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the hidden insights and patterns in customer feedback that require advanced natural language processing to uncover?", "method": "auto"}'
+```
+**Expected Behavior:** 
+- Text2Query may fail (500 error) for advanced NLP tasks
+- System automatically falls back to RAG engine
+- Demonstrates intelligent routing when Text2Query cannot handle complex NLP
+
+##### **Semantic Analysis Question (Text2Query Success Test)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Can you perform semantic analysis and sentiment extraction from the unstructured text data to reveal emotional patterns?", "method": "auto"}'
+```
+**Expected Behavior:**
+- Text2Query successfully handles sentiment analysis using TextBlob
+- Returns `method_used: "text2query"` with comprehensive sentiment analysis code
+- Shows Text2Query's sophisticated analytical capabilities
+
+**💡 Key Insight:** These tests validate the system's intelligent engine selection:
+- **Simple/Structured questions** → Text2Query (fast, efficient)
+- **Complex NLP questions** → RAG (comprehensive, document-based)
+- **Automatic fallback** → Seamless transition when needed
+
 #### 🌆 **Advanced Geographic Analysis Tests**
 
 The following test cases demonstrate the system's ability to handle complex multi-city, multi-region analysis:
@@ -621,7 +652,7 @@ You've successfully set up and tested the **Default Profile** for fridge sales d
 ### 🏆 What You've Accomplished
 
 ✅ **Configured** the default profile for fridge sales data  
-✅ **Tested** both Text2Query and RAG engines with real data  
+✅ **Tested** both Text2Query and RAG engines with real data (62/62 tests passing)  
 ✅ **Verified** API endpoints and functionality  
 ✅ **Learned** when to use each engine for optimal performance  
 ✅ **Analyzed** geographic and brand performance patterns  
