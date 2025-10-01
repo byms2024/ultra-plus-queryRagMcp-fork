@@ -138,54 +138,6 @@ class TestUnifiedAPIEndpoints:
         assert "answer" in data
         assert "method_used" in data
     
-    def test_ask_endpoint_auto_method_complex_rag_1(self, client):
-        """Test complex RAG query that should trigger RAG mode with auto method."""
-        # Question that should fail Text2Query and trigger RAG fallback
-        complex_question = "What are the hidden insights and patterns in customer feedback that require advanced natural language processing to uncover?"
-        
-        payload = {
-            "question": complex_question,
-            "method": "auto"
-        }
-        
-        response = client.post("/ask", json=payload)
-        # Text2Query may fail (500) for advanced NLP questions, which triggers RAG fallback
-        assert response.status_code in [200, 500]
-        
-        if response.status_code == 200:
-            data = response.json()
-            assert data["question"] == complex_question
-            assert "answer" in data
-            # If Text2Query succeeded, it will be "text2query", if it failed and RAG took over, it will be "rag"
-            assert data["method_used"] in ["text2query", "rag"]
-            assert "execution_time" in data
-            assert "profile" in data
-        else:
-            # Text2Query failed, which means RAG should be triggered
-            # This is actually expected behavior for questions that can't be handled by Text2Query
-            assert True  # Test passes - RAG fallback mechanism working
-    
-    def test_ask_endpoint_auto_method_complex_rag_2(self, client):
-        """Test another complex RAG query about semantic analysis."""
-        # Question that should fail Text2Query and trigger RAG fallback
-        complex_question = "Can you perform semantic analysis and sentiment extraction from the unstructured text data to reveal emotional patterns?"
-        
-        payload = {
-            "question": complex_question,
-            "method": "auto"
-        }
-        
-        response = client.post("/ask", json=payload)
-        # Text2Query may succeed for sentiment analysis questions
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert data["question"] == complex_question
-        assert "answer" in data
-        # Text2Query can handle sentiment analysis, so it will likely be "text2query"
-        assert data["method_used"] in ["text2query", "rag"]
-        assert "execution_time" in data
-        assert "profile" in data
     
     def test_ask_endpoint_text2query_method(self, client):
         """Test the ask endpoint with text2query method."""

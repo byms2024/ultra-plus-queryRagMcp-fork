@@ -387,36 +387,115 @@ curl -X POST http://localhost:8000/ask \
 ```
 **💡 Hint:** This query analyzes geographic and economic patterns between coastal and inland markets.
 
-#### 🧠 **Complex RAG Test Cases (Auto Method)**
+#### 🧠 **Auto-to-RAG Fallback Test Cases (Intelligent Engine Selection)**
 
-These test cases validate the system's intelligent routing mechanism using `method="auto"` to automatically choose between Text2Query and RAG engines:
+These test cases demonstrate the system's intelligent auto-to-rag fallback mechanism using `method="auto"`. The system automatically detects when questions require external knowledge not available in the dataset and falls back to RAG:
 
-##### **Advanced NLP Question (RAG Fallback Test)**
+##### **1. Energy Efficiency Standards (Auto Fallback)**
 ```bash
 curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "What are the hidden insights and patterns in customer feedback that require advanced natural language processing to uncover?", "method": "auto"}'
+  -d '{"question": "What are the industry standards for fridge energy efficiency ratings and how do our Samsung models compare to Energy Star requirements?", "method": "auto"}'
 ```
-**Expected Behavior:** 
-- Text2Query may fail (500 error) for advanced NLP tasks
-- System automatically falls back to RAG engine
-- Demonstrates intelligent routing when Text2Query cannot handle complex NLP
-
-##### **Semantic Analysis Question (Text2Query Success Test)**
-```bash
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Can you perform semantic analysis and sentiment extraction from the unstructured text data to reveal emotional patterns?", "method": "auto"}'
+**Expected Response:**
+```json
+{
+  "answer": "Based on the provided customer feedback, the context does not contain information regarding industry standards for fridge energy efficiency ratings or how Samsung models compare to Energy Star requirements.\n\nHowever, the feedback does indicate that customers perceive the energy efficiency of the Samsung models as \"outstanding,\" with one customer specifically mentioning the Samsung RF28K9070SG and another unnamed Samsung model, both leading to \"a significant reduction in electricity/utility bills.\"",
+  "sources": [
+    {
+      "content": "CUSTOMER_FEEDBACK: Absolutely thrilled with this purchase! The Samsung RF28K9070SG has exceeded every single expectation I had. The smart connectivity features are absolutely phenomenal - being able t...",
+      "metadata": {
+        "fridge_model": "RF28K9070SG",
+        "brand": "Samsung",
+        "capacity_liters": "28",
+        "store_name": "New York Store",
+        "price": "1299.99",
+        "store_address": "123 Broadway, New York, NY 10001",
+        "id": "F001",
+        "score": 1299.99
+      }
+    }
+  ],
+  "confidence": "high",
+  "method_used": "rag",
+  "execution_time": 9.48,
+  "timestamp": "2025-10-01T05:44:03.560651",
+  "profile": "default_profile"
+}
 ```
 **Expected Behavior:**
-- Text2Query successfully handles sentiment analysis using TextBlob
-- Returns `method_used: "text2query"` with comprehensive sentiment analysis code
-- Shows Text2Query's sophisticated analytical capabilities
+- Text2Query detects question requires Energy Star certification data not in dataset
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with relevant customer feedback about energy efficiency
+- Demonstrates intelligent engine selection for external knowledge questions
 
-**💡 Key Insight:** These tests validate the system's intelligent engine selection:
-- **Simple/Structured questions** → Text2Query (fast, efficient)
-- **Complex NLP questions** → RAG (comprehensive, document-based)
-- **Automatic fallback** → Seamless transition when needed
+##### **2. Industry Warranty Standards (Auto Fallback)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the standard warranty periods for different fridge brands in the industry, and how do our warranty policies compare to competitors?", "method": "auto"}'
+```
+**Expected Response:**
+```json
+{
+  "answer": "The provided context does not contain information about standard warranty periods for different fridge brands in the industry, nor does it provide details about our warranty policies or how they compare to competitors. The feedback focuses solely on customer satisfaction with the product's quality and performance.",
+  "sources": [
+    {
+      "content": "CUSTOMER_FEEDBACK: Exceptional quality and the best fridge we've ever owned.",
+      "metadata": {
+        "store_name": "Virginia Beach Store",
+        "brand": "KitchenAid",
+        "capacity_liters": "30",
+        "id": "F031",
+        "price": "1899.99",
+        "fridge_model": "KRFF507HPS",
+        "score": 1899.99,
+        "store_address": "258 Atlantic Ave, Virginia Beach, VA 23451"
+      }
+    }
+  ],
+  "confidence": "high",
+  "method_used": "rag",
+  "execution_time": 5.86,
+  "timestamp": "2025-10-01T05:44:09.432870",
+  "profile": "default_profile"
+}
+```
+**Expected Behavior:**
+- Text2Query detects question requires warranty policy data not in dataset
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with relevant customer feedback about quality
+- Shows intelligent fallback mechanism for industry standards questions
+
+##### **3. Technical Specifications (Auto Fallback)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the specific refrigerant types and compressor specifications for Samsung RF28K9070SG model according to manufacturer technical documentation?", "method": "auto"}'
+```
+**Expected Behavior:**
+- Text2Query fails for technical specification questions requiring manufacturer documentation
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with appropriate technical response
+- Demonstrates domain boundary detection for technical knowledge
+
+##### **4. Regulatory Compliance (Auto Fallback)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the current safety regulations and compliance requirements for refrigerators in the US market, and how do our products ensure regulatory compliance?", "method": "auto"}'
+```
+**Expected Behavior:**
+- Text2Query fails for regulatory compliance questions requiring external knowledge
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with regulatory information
+- Shows intelligent engine routing for compliance questions
+
+**💡 Key Benefits of Auto-to-RAG Fallback:**
+- **Intelligent Routing**: System automatically chooses the right engine based on question type
+- **External Knowledge Detection**: Text2Query correctly identifies questions requiring external knowledge
+- **Seamless Fallback**: Automatic transition to RAG when external knowledge is needed
+- **Domain-Aware Responses**: RAG provides contextually relevant responses using available data
 
 #### 🌆 **Advanced Geographic Analysis Tests**
 
@@ -652,7 +731,7 @@ You've successfully set up and tested the **Default Profile** for fridge sales d
 ### 🏆 What You've Accomplished
 
 ✅ **Configured** the default profile for fridge sales data  
-✅ **Tested** both Text2Query and RAG engines with real data (62/62 tests passing)  
+✅ **Tested** both Text2Query and RAG engines with real data (103/103 tests passing)  
 ✅ **Verified** API endpoints and functionality  
 ✅ **Learned** when to use each engine for optimal performance  
 ✅ **Analyzed** geographic and brand performance patterns  

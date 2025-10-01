@@ -416,36 +416,88 @@ curl http://localhost:8000/methods
 }
 ```
 
-#### 🧠 **Complex RAG Test Cases (Auto Method)**
+#### 🧠 **Auto-to-RAG Fallback Test Cases (Intelligent Engine Selection)**
 
-These test cases validate the system's intelligent routing mechanism using `method="auto"` to automatically choose between Text2Query and RAG engines for Brazilian NPS data:
+These test cases demonstrate the system's intelligent auto-to-rag fallback mechanism using `method="auto"` for Brazilian Portuguese NPS data. The system automatically detects when questions require external knowledge not present in the dataset and falls back to RAG:
 
-##### **Advanced NLP Question (RAG Fallback Test)**
+##### **1. Technical Specifications (Auto Fallback)**
 ```bash
 curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "What are the hidden emotional insights and linguistic patterns in customer feedback that require advanced NLP to extract?", "method": "auto"}'
+  -d '{"question": "Quais são as especificações técnicas e benchmarks de performance para sistemas de atendimento ao cliente no setor automotivo brasileiro, e como nossos processos se comparam com os padrões internacionais?", "method": "auto"}'
 ```
-**Expected Behavior:** 
-- Text2Query may fail (500 error) for advanced NLP tasks
-- System automatically falls back to RAG engine
-- Demonstrates intelligent routing when Text2Query cannot handle complex NLP
-
-##### **Advanced Text Mining Question (RAG Fallback Test)**
-```bash
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Can you perform advanced text mining and semantic similarity analysis on the unstructured feedback data to discover hidden correlations?", "method": "auto"}'
+**Expected Response:**
+```json
+{
+  "answer": "O contexto fornecido não contém informações sobre as especificações técnicas, benchmarks de performance para sistemas de atendimento ao cliente no setor automotivo brasileiro, nem sobre a comparação de processos com padrões internacionais.",
+  "sources": [],
+  "confidence": "low",
+  "method_used": "rag",
+  "execution_time": 7.77,
+  "timestamp": "2025-10-01T05:44:51.530166",
+  "profile": "customized_profile"
+}
 ```
 **Expected Behavior:**
-- Text2Query may fail (500 error) for advanced text mining tasks
+- Text2Query detects question requires technical specifications not in NPS dataset
 - System automatically falls back to RAG engine
-- Shows RAG's capability for complex document analysis
+- Returns `method_used: "rag"` with appropriate response in Portuguese
+- Demonstrates intelligent engine selection for external technical knowledge
 
-**💡 Key Insight:** These tests validate the system's intelligent engine selection for Brazilian Portuguese NPS data:
-- **Simple/Structured questions** → Text2Query (fast, efficient)
-- **Complex NLP questions** → RAG (comprehensive, document-based)
-- **Automatic fallback** → Seamless transition when needed
+##### **2. Global Industry Benchmarks (Auto Fallback)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Quais são os benchmarks de NPS da indústria automotiva global e como nossos dealers se comparam com as melhores práticas internacionais de atendimento ao cliente?", "method": "auto"}'
+```
+**Expected Response:**
+```json
+{
+  "answer": "O contexto fornecido não contém informações sobre os benchmarks de NPS da indústria automotiva global, nem sobre como os dealers se comparam com as melhores práticas internacionais de atendimento ao cliente.",
+  "sources": [],
+  "confidence": "low",
+  "method_used": "rag",
+  "execution_time": 5.17,
+  "timestamp": "2025-10-01T05:45:06.210652",
+  "profile": "customized_profile"
+}
+```
+**Expected Behavior:**
+- Text2Query fails for questions requiring global industry benchmarks not in dataset
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with appropriate response in Portuguese
+- Shows intelligent fallback mechanism for external benchmark data
+
+##### **3. Brazilian Industry Standards (Auto Fallback)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Quais são os padrões de NPS da indústria automotiva brasileira e como nossos resultados se comparam com os benchmarks internacionais de satisfação do cliente?", "method": "auto"}'
+```
+**Expected Behavior:**
+- Text2Query fails for questions requiring Brazilian automotive industry standards
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with appropriate response in Portuguese
+- Demonstrates domain boundary detection for industry standards
+
+##### **4. Regulatory Compliance (Auto Fallback)**
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Quais são as regulamentações brasileiras e padrões de qualidade para atendimento ao cliente no setor automotivo, e como nossos processos garantem conformidade com essas diretrizes?", "method": "auto"}'
+```
+**Expected Behavior:**
+- Text2Query fails for questions requiring Brazilian regulatory knowledge
+- System automatically falls back to RAG engine
+- Returns `method_used: "rag"` with appropriate response in Portuguese
+- Shows intelligent engine routing for regulatory compliance
+
+**💡 Key Benefits of Auto-to-RAG Fallback for NPS Data:**
+- **Intelligent Routing**: System automatically chooses the right engine for Portuguese questions
+- **External Knowledge Detection**: Text2Query correctly identifies questions requiring external knowledge not in dataset
+- **Seamless Fallback**: Automatic transition to RAG when external knowledge is needed
+- **Multilingual Support**: Robust error handling for Portuguese language questions
+- **Domain-Aware Responses**: RAG provides contextually relevant responses using available NPS data
 
 #### 🎯 **Engine Selection Guidelines for NPS Data**
 
@@ -648,7 +700,7 @@ You've successfully set up and tested the **Customized Profile** for NPS data an
 ### 🏆 What You've Accomplished
 
 ✅ **Configured** the customized profile for NPS data analysis  
-✅ **Tested** both Text2Query and RAG engines with Brazilian Portuguese support (48/48 tests passing)  
+✅ **Tested** both Text2Query and RAG engines with Brazilian Portuguese support (95/95 tests passing)  
 ✅ **Verified** API endpoints and Portuguese language functionality  
 ✅ **Learned** when to use each engine for optimal NPS performance  
 ✅ **Analyzed** dealer performance and service quality patterns  

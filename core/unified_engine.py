@@ -142,8 +142,14 @@ class UnifiedQueryEngine:
                     result = self.text2query_engine.execute_query(question)
                     
                     if result and not result.get('error') and result.get('answer'):
-                        method_used = "text2query"
-                        logger.info("Text2Query succeeded")
+                        # Check if the answer starts with "Error:" - this indicates Text2Query failed
+                        answer_text = result.get('answer', '')
+                        if answer_text.startswith('Error:'):
+                            logger.info("Text2Query returned error response, will try RAG")
+                            result = None
+                        else:
+                            method_used = "text2query"
+                            logger.info("Text2Query succeeded")
                     else:
                         logger.info("Text2Query yielded no result, will try RAG")
                         result = None
