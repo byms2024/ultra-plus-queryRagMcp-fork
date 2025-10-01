@@ -20,9 +20,9 @@ if __name__ == "__main__":
     print("API documentation at: http://localhost:8000/docs")
     
     uvicorn.run(
-        app,
+        "api.unified_api:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=False,
         log_level="info"
     )

@@ -154,6 +154,10 @@ class SystemConfig:
     log_to_console: bool = DEFAULT_LOG_TO_CONSOLE
     max_file_size: int = DEFAULT_MAX_FILE_SIZE
     backup_count: int = DEFAULT_BACKUP_COUNT
+    
+    # Timeouts and budgets
+    llm_request_timeout_seconds: int = 60
+    text2query_time_budget_seconds: int = 120
 
 
 def load_config() -> Config:
@@ -238,6 +242,10 @@ def load_system_config() -> SystemConfig:
                 config.langsmith_project = constants.LANGSMITH_PROJECT
             if hasattr(constants, 'ENABLE_TRACING'):
                 config.enable_tracing = constants.ENABLE_TRACING
+            if hasattr(constants, 'LLM_REQUEST_TIMEOUT_SECONDS'):
+                config.llm_request_timeout_seconds = constants.LLM_REQUEST_TIMEOUT_SECONDS
+            if hasattr(constants, 'TEXT2QUERY_TIME_BUDGET_SECONDS'):
+                config.text2query_time_budget_seconds = constants.TEXT2QUERY_TIME_BUDGET_SECONDS
                 
     except Exception as e:
         # If profile override fails, continue with default config

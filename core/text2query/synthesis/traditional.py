@@ -1,9 +1,11 @@
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from config.logging_config import get_rag_logger
-from config.base_config import Config
+from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
 from ..utils.time_utils import parse_relative_date_range
 from config.providers.registry import LLMFactory
@@ -55,7 +57,20 @@ class QuerySynthesizer:
                 "Return only JSON matching the schema."
             )
 
-            response = self.llm_provider.invoke(system_rules + "\n" + schema_hint + "\n" + prompt)
+            # Log before LLM call
+            logger.info("🤖 Calling LLM (traditional synthesis)...")
+            llm_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
+            llm_start = time.time()
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(self.llm_provider.invoke, system_rules + "\n" + schema_hint + "\n" + prompt)
+                    response = future.result(timeout=llm_timeout)
+            except FuturesTimeoutError:
+                logger.warning(f"⏱️ LLM call timed out after {llm_timeout:.2f}s (traditional)")
+                return None
+            llm_duration = time.time() - llm_start
+            logger.info(f"✅ LLM response received in {llm_duration:.2f}s")
+            
             # Handle LangChain response format
             if hasattr(response, 'content'):
                 raw_text = response.content
