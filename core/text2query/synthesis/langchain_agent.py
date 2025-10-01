@@ -5,11 +5,12 @@ Integrates with existing profile system and enhanced data cleaning.
 """
 
 import pandas as pd
+import time
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 from config.logging_config import get_logger
-from config.base_config import Config
+from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
 from ..data import build_schema_description, validate_dataframe_for_langchain
 from config.providers.registry import LLMFactory
@@ -83,10 +84,14 @@ class LangChainAgentEngine:
             context_query = self._build_context_query(query, df)
             
             # Run the agent query
-            logger.info(f"Running agent query: {query}")
+            logger.info(f"🤖 Running LangChain agent query...")
+            agent_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
+            agent_start = time.time()
+            # Note: Agent.run may block; unified engine also has a budget timeout.
             result = agent.run(context_query)
+            agent_duration = time.time() - agent_start
+            logger.info(f"✅ Agent query completed in {agent_duration:.2f}s")
             
-            logger.info(f"Agent query completed successfully")
             return str(result)
             
         except Exception as e:

@@ -16,7 +16,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from config.base_config import load_system_config, get_profile
-from config.logging_config import get_logger, log_system_info
+from config.logging_config import (
+    get_logger,
+    log_system_info,
+    set_request_id,
+    clear_request_id,
+    get_request_id,
+)
 from core.unified_engine import UnifiedQueryEngine
 from reports.generic_report_builder import generate_report_from_question, ReportConfig
 
@@ -99,6 +105,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def request_context_logging_middleware(request, call_next):
+    """Attach a correlation id to the request lifecycle and log access details."""
+    from time import perf_counter
+    import uuid as _uuid
+
+    # Prefer incoming header if present
+    incoming_id = request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID")
+    request_id = set_request_id(incoming_id or str(_uuid.uuid4()))
+
+    start = perf_counter()
+    try:
+        logger.info(
+            f"Incoming {request.method} {request.url.path} - from {request.client.host if request.client else 'n/a'}"
+        )
+        response = await call_next(request)
+        duration_ms = (perf_counter() - start) * 1000.0
+        # Attach request id to response for clients
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            f"Completed {request.method} {request.url.path} -> {response.status_code} in {duration_ms:.2f}ms"
+        )
+        return response
+    except Exception as e:
+        logger.error(f"Unhandled error for {request.method} {request.url.path}: {e}")
+        raise
+    finally:
+        clear_request_id()
 
 @app.on_event("startup")
 async def startup_event():

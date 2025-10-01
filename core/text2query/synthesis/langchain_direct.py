@@ -5,12 +5,13 @@ Integrates with existing profile system and enhanced data cleaning.
 """
 
 import json
+import time
 import pandas as pd
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 from config.logging_config import get_logger
-from config.base_config import Config
+from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
 from ..utils.time_utils import parse_relative_date_range
 from ..data import build_schema_description, validate_dataframe_for_langchain
@@ -65,18 +66,30 @@ class LangChainQuerySynthesizer:
             )
             
             # Step 5: Generate pandas code using LangChain
+            logger.info("🤖 Calling LLM (LangChain direct synthesis)...")
+            llm_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
+            llm_start = time.time()
+            # Use a minimal timeout wrapper without introducing threads here (LangChain wrappers may support timeouts via client config; fallback to coarse timing)
+            # If provider blocks beyond budget, unified engine budget will also cut it off.
             response = self.llm_provider.invoke(full_prompt)
+            llm_duration = time.time() - llm_start
+            logger.info(f"✅ LLM response received in {llm_duration:.2f}s")
+            
             code = self._extract_code_from_response(response)
             
             logger.debug(f"Generated pandas code: {code}")
             
             # Step 6: Execute the code safely
+            logger.info("⚙️ Executing generated pandas code...")
+            exec_start = time.time()
             result = self._execute_pandas_code(code, df)
+            exec_duration = time.time() - exec_start
+            logger.info(f"✅ Code execution completed in {exec_duration:.2f}s")
             
             return result
             
         except Exception as e:
-            logger.error(f"LangChain pandas generation failed: {e}")
+            logger.error(f"❌ LangChain pandas generation failed: {e}")
             return f"Generation error: {e}"
     
     def _build_system_prompt(self) -> str:

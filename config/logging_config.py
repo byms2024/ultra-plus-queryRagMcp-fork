@@ -3,10 +3,43 @@ import logging.handlers
 from pathlib import Path
 from datetime import datetime
 import os
+import uuid
+import contextvars
 
 # Base directory for the project
 BASE_DIR = Path(__file__).parent.parent.resolve()
 LOGS_DIR = BASE_DIR / "logs"
+
+# Context variable to track request/correlation id across async contexts
+_request_id_ctx_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="n/a")
+
+
+class RequestIdFilter(logging.Filter):
+    """Logging filter that injects request_id into every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.request_id = _request_id_ctx_var.get()
+        except Exception:
+            record.request_id = "n/a"
+        return True
+
+
+def set_request_id(request_id: str | None = None) -> str:
+    """Set the request id for current context and return it."""
+    rid = request_id or str(uuid.uuid4())
+    _request_id_ctx_var.set(rid)
+    return rid
+
+
+def clear_request_id() -> None:
+    """Clear the request id for current context."""
+    _request_id_ctx_var.set("n/a")
+
+
+def get_request_id() -> str:
+    """Get the current request id."""
+    return _request_id_ctx_var.get()
 
 def setup_logging(
     log_level: str = "INFO",
@@ -34,7 +67,7 @@ def setup_logging(
     
     # Create formatters
     detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
+        '%(asctime)s - %(levelname)s - %(request_id)s - %(name)s - %(filename)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
@@ -50,11 +83,14 @@ def setup_logging(
     # Clear existing handlers
     root_logger.handlers.clear()
     
+    request_id_filter = RequestIdFilter()
+
     # Console handler
     if log_to_console:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(numeric_level)
         console_handler.setFormatter(simple_formatter)
+        console_handler.addFilter(request_id_filter)
         root_logger.addHandler(console_handler)
     
     # File handlers
@@ -69,6 +105,7 @@ def setup_logging(
         )
         app_handler.setLevel(numeric_level)
         app_handler.setFormatter(detailed_formatter)
+        app_handler.addFilter(request_id_filter)
         root_logger.addHandler(app_handler)
         
         # Error log (only errors and above)
@@ -81,6 +118,7 @@ def setup_logging(
         )
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(detailed_formatter)
+        error_handler.addFilter(request_id_filter)
         root_logger.addHandler(error_handler)
         
         # API access log
@@ -93,12 +131,52 @@ def setup_logging(
         )
         api_handler.setLevel(logging.INFO)
         api_handler.setFormatter(detailed_formatter)
+        api_handler.addFilter(request_id_filter)
         
         # Create API logger
         api_logger = logging.getLogger("api")
         api_logger.setLevel(logging.INFO)
         api_logger.addHandler(api_handler)
         api_logger.propagate = False  # Don't propagate to root logger
+
+        # RAG engine log
+        rag_log_file = LOGS_DIR / "rag.log"
+        rag_handler = logging.handlers.RotatingFileHandler(
+            rag_log_file,
+            maxBytes=max_file_size,
+            backupCount=backup_count,
+            encoding='utf-8'
+        )
+        rag_handler.setLevel(logging.INFO)
+        rag_handler.setFormatter(detailed_formatter)
+        rag_handler.addFilter(request_id_filter)
+
+        rag_logger = logging.getLogger("rag")
+        rag_logger.setLevel(logging.INFO)
+        rag_logger.addHandler(rag_handler)
+        rag_logger.propagate = False
+
+        # Server log
+        server_log_file = LOGS_DIR / "server.log"
+        server_handler = logging.handlers.RotatingFileHandler(
+            server_log_file,
+            maxBytes=max_file_size,
+            backupCount=backup_count,
+            encoding='utf-8'
+        )
+        server_handler.setLevel(logging.INFO)
+        server_handler.setFormatter(detailed_formatter)
+        server_handler.addFilter(request_id_filter)
+
+        server_logger = logging.getLogger("server")
+        server_logger.setLevel(logging.INFO)
+        server_logger.addHandler(server_handler)
+        server_logger.propagate = False
+
+        # Route uvicorn access logs into api logger file as well
+        uvicorn_access_logger = logging.getLogger("uvicorn.access")
+        uvicorn_access_logger.addHandler(api_handler)
+        uvicorn_access_logger.setLevel(logging.INFO)
 
 def get_logger(name: str) -> logging.Logger:
     """

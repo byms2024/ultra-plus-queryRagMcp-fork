@@ -41,10 +41,10 @@ class QuerySynthesisEngine:
         
         # Initialize LLM provider (shared across all methods)
         self.llm_provider = self._create_llm_provider()
-        
+        logger.info(f"LLM provider initialized: {self.llm_provider}")
         # Initialize censoring with profile mappings
         self.censor = CensoringService()
-        
+        logger.info(f"Censoring service initialized: {self.censor}")
         # Initialize specialized modules
         self.data_manager = DataManager(config, self.profile)
         self.response_builder = ResponseBuilder(self.profile)
@@ -148,7 +148,12 @@ class QuerySynthesisEngine:
             else:
                 self.performance_stats[method]["failure_count"] += 1
     
-    def synthesize_query(self, question: str, method: str = "auto") -> Optional[Dict[str, Any]]:
+    def synthesize_query(
+        self,
+        question: str,
+        method: str = "auto",
+        attempt_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Synthesize a query using the specified method or auto-select the best method.
         
@@ -160,42 +165,81 @@ class QuerySynthesisEngine:
             Query specification or result dictionary
         """
         original_method = method
+        attempt_history = attempt_history or []
         if method == "auto":
             method = self._select_best_method(question, self.df)
         
-        logger.info(f"Using synthesis method: {method}")
+        logger.info(
+            f"📋 Using synthesis method: {method}"
+            + (f" (requested: {original_method})" if original_method != method else "")
+        )
         
         try:
             start_time = time.time()
+            logger.info(f"🔄 Starting synthesis with {method}...")
             result = self._synthesize_with_method(method, question)
             execution_time = time.time() - start_time
             
             # Update performance stats
             self._update_performance_stats(method, True, execution_time)
             
+            logger.info(f"✅ Synthesis completed with {method} in {execution_time:.2f}s")
+
+            attempt_history.append(
+                {
+                    "method": method,
+                    "success": True,
+                    "duration": execution_time,
+                }
+            )
+            
             # Add method metadata
             if result:
                 result["synthesis_method"] = method
                 result["execution_time"] = execution_time
-            
+            else:
+                result = {
+                    "synthesis_method": method,
+                    "execution_time": execution_time,
+                }
+
+            result["attempt_history"] = attempt_history.copy()
+
             return result
             
         except Exception as e:
-            logger.error(f"Synthesis failed with method {method}: {e}")
+            execution_time = time.time() - start_time
+            logger.error(f"❌ Synthesis failed with method {method} after {execution_time:.2f}s: {e}")
             self._update_performance_stats(method, False, 0)
+
+            attempt_history.append(
+                {
+                    "method": method,
+                    "success": False,
+                    "duration": execution_time,
+                }
+            )
+
+            lost_time = sum(a["duration"] for a in attempt_history if not a["success"])
+            logger.warning(f"⏱️ Time lost on {method}: {execution_time:.2f}s (cumulative lost: {lost_time:.2f}s)")
             
             # Try fallback methods
             if method != "traditional" and self.traditional_synthesizer:
-                logger.info("Trying traditional method as fallback")
-                return self.synthesize_query(question, "traditional")
+                logger.info(
+                    f"🔄 Trying traditional method as fallback (cumulative lost time: {lost_time:.2f}s)"
+                )
+                return self.synthesize_query(question, "traditional", attempt_history)
             elif method != "langchain_direct" and self.langchain_synthesizer:
-                logger.info("Trying LangChain direct method as fallback")
-                return self.synthesize_query(question, "langchain_direct")
+                logger.info(
+                    f"🔄 Trying LangChain direct method as fallback (cumulative lost time: {lost_time:.2f}s)"
+                )
+                return self.synthesize_query(question, "langchain_direct", attempt_history)
             
             return {
                 "error": f"All synthesis methods failed. Last error: {e}",
                 "query_type": "synthesis_error",
-                "synthesis_method": method
+                "synthesis_method": method,
+                "attempt_history": attempt_history.copy(),
             }
     
     def _synthesize_with_method(self, method: str, question: str) -> Optional[Dict[str, Any]]:
@@ -225,48 +269,114 @@ class QuerySynthesisEngine:
         Returns:
             Dictionary with result, sources, stats, and metadata
         """
+        query_start = time.time()
         try:
             # Synthesize the query
+            synthesis_start = time.time()
+            logger.info(f"🔍 Starting query synthesis...")
             query_spec = self.synthesize_query(question, method)
+            synthesis_time = time.time() - synthesis_start
+            attempt_history = (
+                query_spec.get("attempt_history", [])
+                if isinstance(query_spec, dict)
+                else []
+            )
             
             if not query_spec or "error" in query_spec:
-                return {
+                logger.warning(f"⚠️ Synthesis returned error after {synthesis_time:.2f}s")
+                response = {
                     "answer": f"Error: {query_spec.get('error', 'Synthesis failed') if query_spec else 'No result'}",
                     "sources": [],
                     "stats": {},
                     "method": query_spec.get("synthesis_method", method) if query_spec else method,
-                    "execution_time": query_spec.get("execution_time", 0) if query_spec else 0
+                    "execution_time": query_spec.get("execution_time", 0) if query_spec else 0,
                 }
+                if attempt_history:
+                    total_attempt_time = sum(a["duration"] for a in attempt_history)
+                    total_lost_time = sum(
+                        a["duration"] for a in attempt_history if not a["success"]
+                    )
+                    logger.info(
+                        "⏱️ Text2Query attempts exhausted | total_attempt_time=%.2fs | total_lost_time=%.2fs | attempts=%s",
+                        total_attempt_time,
+                        total_lost_time,
+                        ", ".join(
+                            f"{a['method']}:{'ok' if a['success'] else 'fail'}:{a['duration']:.2f}s"
+                            for a in attempt_history
+                        ),
+                    )
+                    response["attempt_history"] = attempt_history
+                    response["total_attempt_time"] = total_attempt_time
+                    response["total_lost_time"] = total_lost_time
+                return response
             
             # Execute the query based on its type
             if query_spec.get("query_type") in ["langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent"]:
                 # LangChain methods return results directly
+                logger.info(f"⚡ Building response from LangChain result...")
                 response = self.response_builder.build_response(query_spec.get("result"), query_spec)
-                return {
+                total_time = time.time() - query_start
+                logger.info(f"✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s)")
+                payload = {
                     "answer": response.get("answer", ""),
                     "sources": response.get("sources", []),
                     "confidence": response.get("confidence", "medium"),
                     "stats": self._generate_stats_from_result(query_spec.get("result")),
                     "method": query_spec.get("synthesis_method", method),
-                    "execution_time": query_spec.get("execution_time", 0)
+                    "execution_time": query_spec.get("execution_time", 0),
                 }
+                if attempt_history:
+                    total_attempt_time = sum(a["duration"] for a in attempt_history)
+                    total_lost_time = sum(
+                        a["duration"] for a in attempt_history if not a["success"]
+                    )
+                    payload["attempt_history"] = attempt_history
+                    payload["total_attempt_time"] = total_attempt_time
+                    payload["total_lost_time"] = total_lost_time
+                    logger.info(
+                        "⏱️ Text2Query attempts summary | total_attempt_time=%.2fs | total_lost_time=%.2fs",
+                        total_attempt_time,
+                        total_lost_time,
+                    )
+                return payload
             else:
                 # Traditional method needs execution via QueryExecutor
+                exec_start = time.time()
+                logger.info(f"⚡ Executing traditional query...")
                 executor = QueryExecutor(self.profile)
                 df_result = executor.apply(self.df, query_spec)
+                exec_time = time.time() - exec_start
                 
+                logger.info(f"⚡ Building response...")
                 response = self.response_builder.build_response(df_result, query_spec)
-                return {
+                total_time = time.time() - query_start
+                logger.info(f"✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s, execution: {exec_time:.2f}s)")
+                payload = {
                     "answer": response.get("answer", ""),
                     "sources": response.get("sources", []),
                     "confidence": response.get("confidence", "medium"),
                     "stats": self._generate_stats_from_result(df_result),
                     "method": query_spec.get("synthesis_method", method),
-                    "execution_time": query_spec.get("execution_time", 0)
+                    "execution_time": query_spec.get("execution_time", 0),
                 }
+                if attempt_history:
+                    total_attempt_time = sum(a["duration"] for a in attempt_history)
+                    total_lost_time = sum(
+                        a["duration"] for a in attempt_history if not a["success"]
+                    )
+                    payload["attempt_history"] = attempt_history
+                    payload["total_attempt_time"] = total_attempt_time
+                    payload["total_lost_time"] = total_lost_time
+                    logger.info(
+                        "⏱️ Text2Query attempts summary | total_attempt_time=%.2fs | total_lost_time=%.2fs",
+                        total_attempt_time,
+                        total_lost_time,
+                    )
+                return payload
                 
         except Exception as e:
-            logger.error(f"Query execution failed: {e}")
+            total_time = time.time() - query_start
+            logger.error(f"❌ Query execution failed after {total_time:.2f}s: {e}")
             return {
                 "answer": f"Error: {e}",
                 "sources": [],
