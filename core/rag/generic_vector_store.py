@@ -52,6 +52,18 @@ class GenericVectorStore:
         """Perform similarity search with scores."""
         return self.vectorstore_impl.similarity_search_with_score(query, k)
     
+    def similarity_search_with_score_threshold(
+        self, 
+        query: str, 
+        similarity_threshold: float = 0.7,
+        max_results: int = 100,
+        min_results: int = 1
+    ) -> List[tuple]:
+        """Perform similarity search with threshold filtering."""
+        return self.vectorstore_impl.similarity_search_with_score_threshold(
+            query, similarity_threshold, max_results, min_results
+        )
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get vector store statistics."""
         stats = self.vectorstore_impl.get_stats()

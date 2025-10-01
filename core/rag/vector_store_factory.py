@@ -33,6 +33,17 @@ class VectorStoreInterface(ABC):
         pass
     
     @abstractmethod
+    def similarity_search_with_score_threshold(
+        self, 
+        query: str, 
+        similarity_threshold: float = 0.7,
+        max_results: int = 100,
+        min_results: int = 1
+    ) -> List[tuple]:
+        """Perform similarity search with similarity threshold filtering."""
+        pass
+    
+    @abstractmethod
     def get_stats(self) -> Dict[str, Any]:
         """Get vector store statistics."""
         pass
@@ -144,6 +155,45 @@ class ChromaVectorStore(VectorStoreInterface):
             return results
         except Exception as e:
             logger.error(f"ChromaDB similarity search with score failed: {e}")
+            return []
+    
+    def similarity_search_with_score_threshold(
+        self, 
+        query: str, 
+        similarity_threshold: float = 0.7,
+        max_results: int = 100,
+        min_results: int = 1
+    ) -> List[tuple]:
+        """Perform similarity search with threshold filtering using ChromaDB."""
+        if self.vectorstore is None:
+            raise ValueError("ChromaDB vector store not initialized. Call build_vectorstore() first.")
+        
+        try:
+            # Get more results than needed to ensure we have enough after filtering
+            search_k = max(max_results * 2, 50)  # Search for 2x max_results to account for filtering
+            results = self.vectorstore.similarity_search_with_score(query, k=search_k)
+            
+            # Filter results by similarity threshold
+            # Note: ChromaDB returns cosine similarity scores (higher = more similar)
+            filtered_results = [
+                (doc, score) for doc, score in results 
+                if score >= similarity_threshold
+            ]
+            
+            # Apply result limits
+            if len(filtered_results) > max_results:
+                filtered_results = filtered_results[:max_results]
+            
+            # Ensure minimum results if we have any
+            if len(filtered_results) < min_results and len(results) > 0:
+                # Take the best results even if they don't meet threshold
+                filtered_results = results[:min_results]
+            
+            logger.info(f"Found {len(filtered_results)} documents above threshold {similarity_threshold} for query: {query[:50]}...")
+            return filtered_results
+            
+        except Exception as e:
+            logger.error(f"ChromaDB threshold similarity search failed: {e}")
             return []
     
     def get_stats(self) -> Dict[str, Any]:
@@ -304,6 +354,54 @@ class FAISSVectorStore(VectorStoreInterface):
             return results
         except Exception as e:
             logger.error(f"FAISS similarity search with score failed: {e}")
+            return []
+    
+    def similarity_search_with_score_threshold(
+        self, 
+        query: str, 
+        similarity_threshold: float = 0.7,
+        max_results: int = 100,
+        min_results: int = 1
+    ) -> List[tuple]:
+        """Perform similarity search with threshold filtering using FAISS."""
+        if self.vectorstore is None:
+            raise ValueError("FAISS vector store not initialized. Call build_vectorstore() first.")
+        
+        try:
+            # Get more results than needed to ensure we have enough after filtering
+            search_k = max(max_results * 2, 50)  # Search for 2x max_results to account for filtering
+            results = self.vectorstore.similarity_search_with_score(query, k=search_k)
+            
+            # Filter results by similarity threshold
+            # Note: FAISS typically returns distance scores (lower = more similar)
+            # We need to convert distance to similarity score (1 - distance) for threshold comparison
+            filtered_results = []
+            for doc, distance in results:
+                # Convert distance to similarity (assuming normalized distance 0-1)
+                # For FAISS, lower distance = higher similarity
+                similarity = max(0.0, 1.0 - distance)
+                if similarity >= similarity_threshold:
+                    filtered_results.append((doc, similarity))
+            
+            # Apply result limits
+            if len(filtered_results) > max_results:
+                filtered_results = filtered_results[:max_results]
+            
+            # Ensure minimum results if we have any
+            if len(filtered_results) < min_results and len(results) > 0:
+                # Take the best results even if they don't meet threshold
+                # Convert distance back to similarity for consistency
+                best_results = []
+                for doc, distance in results[:min_results]:
+                    similarity = max(0.0, 1.0 - distance)
+                    best_results.append((doc, similarity))
+                filtered_results = best_results
+            
+            logger.info(f"Found {len(filtered_results)} documents above threshold {similarity_threshold} for query: {query[:50]}...")
+            return filtered_results
+            
+        except Exception as e:
+            logger.error(f"FAISS threshold similarity search failed: {e}")
             return []
     
     def get_stats(self) -> Dict[str, Any]:

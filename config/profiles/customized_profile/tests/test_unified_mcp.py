@@ -15,7 +15,10 @@ from unittest.mock import Mock, patch, MagicMock
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from servers.unified_mcp_server import UnifiedMCPServer
+# Set the profile to customized_profile for these tests
+os.environ['PROFILE'] = 'customized_profile'
+
+from servers.unified_mcp_server import server, handle_list_tools, handle_call_tool
 from config.profiles.customized_profile.profile_config import CustomizedProfile
 
 # =============================================================================

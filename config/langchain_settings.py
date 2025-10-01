@@ -23,6 +23,10 @@ from .base_config import (
     get_chunk_overlap,
     get_top_k,
     get_max_iterations,
+    get_retrieval_strategy,
+    get_similarity_threshold,
+    get_max_search_with_threshold,
+    get_min_results_with_threshold,
     get_sample_size,
     get_langsmith_api_key,
     get_langsmith_project,
@@ -54,6 +58,10 @@ class LangChainConfig:
         self.chunk_overlap = get_chunk_overlap()
         self.top_k = get_top_k()
         self.max_iterations = get_max_iterations()
+        self.retrieval_strategy = get_retrieval_strategy()
+        self.similarity_threshold = get_similarity_threshold()
+        self.max_search_with_threshold = get_max_search_with_threshold()
+        self.min_results_with_threshold = get_min_results_with_threshold()
         self.mcp_port = get_mcp_port()
         self.api_port = get_api_port()
         self.csv_file = get_data_file_path()  # Now uses profile-based path

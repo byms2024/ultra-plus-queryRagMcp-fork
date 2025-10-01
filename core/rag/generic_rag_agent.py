@@ -15,6 +15,8 @@ from config.providers.registry import ProviderConfig, LLMFactory, EmbeddingsFact
 from config.logging_config import get_logger
 from .generic_data_processor import GenericDataProcessor, DataSchema
 from .generic_vector_store import GenericVectorStore
+from .config.rag_config import RAGConfig
+from .strategies import StrategyFactory
 
 logger = get_logger(__name__)
 
@@ -33,6 +35,7 @@ class GenericRAGAgent:
         self.agent = None
         self.data_processor = None
         self.sensitive_mapping = {}
+        self.retrieval_strategy = None
         
         self._initialize_components(provider_config)
     
@@ -75,6 +78,9 @@ class GenericRAGAgent:
             vector_store_type=self.config.vector_store_type
         )
         
+        # Initialize retrieval strategy
+        self._initialize_retrieval_strategy()
+        
         # Load and process data
         self._load_and_process_data()
         
@@ -85,6 +91,42 @@ class GenericRAGAgent:
         self._initialize_agent()
         
         logger.info("Generic RAG components initialized successfully")
+    
+    def _initialize_retrieval_strategy(self):
+        """
+        Initialize the retrieval strategy using the Strategy Pattern.
+        
+        This method creates a RAGConfig from the current configuration and
+        uses the StrategyFactory to create the appropriate retrieval strategy.
+        
+        The strategy is then used in search_relevant_chunks to perform
+        retrieval operations according to the configured strategy.
+        """
+        logger.info("Initializing retrieval strategy...")
+        
+        try:
+            # Create RAGConfig from current configuration
+            rag_config = RAGConfig(
+                retrieval_strategy=self.config.retrieval_strategy,
+                top_k=self.config.top_k,
+                max_iterations=self.config.max_iterations,
+                similarity_threshold=self.config.similarity_threshold,
+                max_search_with_threshold=self.config.max_search_with_threshold,
+                min_results_with_threshold=self.config.min_results_with_threshold
+            )
+            
+            # Create strategy using factory
+            self.retrieval_strategy = StrategyFactory.create_strategy(rag_config)
+            
+            logger.info(f"Retrieval strategy initialized: {self.retrieval_strategy.get_strategy_name()}")
+            logger.info(f"Strategy description: {self.retrieval_strategy.get_strategy_description()}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize retrieval strategy: {e}")
+            # Fallback to top_k strategy
+            fallback_config = RAGConfig(retrieval_strategy="top_k", top_k=50)
+            self.retrieval_strategy = StrategyFactory.create_strategy(fallback_config)
+            logger.warning(f"Using fallback strategy: {self.retrieval_strategy.get_strategy_name()}")
     
     def _load_and_process_data(self):
         """Load and process data, then build vector store."""
@@ -248,25 +290,68 @@ Answer:"""
                 "timestamp": datetime.now().isoformat()
             }
     
-    def search_relevant_chunks(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """Search for relevant chunks."""
+    def search_relevant_chunks(
+        self, 
+        query: str, 
+        top_k: Optional[int] = None,
+        similarity_threshold: Optional[float] = None,
+        max_results: Optional[int] = None,
+        min_results: Optional[int] = None,
+        retrieval_strategy: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for relevant chunks using the configured retrieval strategy.
+        
+        This method now uses the Strategy Pattern to delegate retrieval operations
+        to the appropriate strategy implementation. The strategy is created during
+        initialization and handles all the complexity of different retrieval approaches.
+        
+        Args:
+            query: User query string to search for
+            top_k: Override for top_k parameter (optional)
+            similarity_threshold: Override for similarity threshold (optional)
+            max_results: Override for max search results (optional)
+            min_results: Override for minimum results (optional)
+            retrieval_strategy: Override for retrieval strategy (optional)
+            
+        Returns:
+            List of result dictionaries with content, similarity, and metadata
+            
+        Example:
+            >>> agent = GenericRAGAgent(config, schema)
+            >>> results = agent.search_relevant_chunks("Samsung refrigerators")
+            >>> print(f"Found {len(results)} results")
+            >>> for result in results:
+            ...     print(f"Score: {result['similarity']:.3f}")
+        """
         try:
-            results = self.vectorstore.similarity_search_with_score(query, k=top_k)
+            # Create RAGConfig with current settings and overrides
+            rag_config = RAGConfig(
+                retrieval_strategy=retrieval_strategy or self.config.retrieval_strategy,
+                top_k=top_k or self.config.top_k,
+                max_iterations=self.config.max_iterations,
+                similarity_threshold=similarity_threshold or self.config.similarity_threshold,
+                max_search_with_threshold=max_results or self.config.max_search_with_threshold,
+                min_results_with_threshold=min_results or self.config.min_results_with_threshold
+            )
             
-            chunks = []
-            for doc, score in results:
-                chunk = {
-                    "content": doc.page_content,
-                    "metadata": doc.metadata,
-                    "similarity": float(score)
-                }
-                chunks.append(chunk)
+            # Use the configured strategy to perform retrieval
+            # This delegates all the complex strategy logic to the appropriate strategy class
+            results = self.retrieval_strategy.search_relevant_chunks(
+                query=query,
+                vectorstore=self.vectorstore,
+                config=rag_config
+            )
             
-            return chunks
+            logger.info(f"Retrieved {len(results)} chunks for query: {query[:50]}...")
+            logger.info(f"Using strategy: {self.retrieval_strategy.get_strategy_name()}")
+            
+            return results
             
         except Exception as e:
             logger.error(f"Error searching chunks: {e}")
             return []
+    
     
     def get_stats(self) -> Dict[str, Any]:
         """Get comprehensive statistics."""

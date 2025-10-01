@@ -4,19 +4,21 @@ Centralized configuration settings for the Generic RAG system.
 All environment variables and settings are consolidated here.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
 
 from .profiles.profile_factory import ProfileFactory
 from .profiles.base_profile import BaseProfile
+from .providers.registry import ProviderConfig
 
 # =============================================================================
 # CONSTANTS - Default configuration values that can be overridden by profiles
 # =============================================================================
 
-# Profile Selection
-PROFILE = "default_profile"  # Options: "default_profile", "customized_profile"
+# Profile Selection - can be overridden by PROFILE environment variable
+PROFILE = os.getenv("PROFILE", "default_profile")  # Options: "default_profile", "customized_profile"
 
 # LLM Configuration
 DEFAULT_GENERATION_MODEL = "gemini-2.5-flash"
@@ -29,8 +31,40 @@ DEFAULT_VECTOR_STORE_TYPE = "chroma"  # Options: "chroma", "faiss"
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_CHUNK_OVERLAP = 200
 
-# RAG Configuration
-DEFAULT_TOP_K = 50
+# =============================================================================
+# RAG RETRIEVAL CONFIGURATION
+# =============================================================================
+
+DEFAULT_RETRIEVAL_STRATEGY = "hybrid"  # Strategy: "top_k" (quantity-focused) or "hybrid" (quality+quantity)
+DEFAULT_TOP_K = 50                     # Number of results for top_k strategy (1-1000)
+DEFAULT_SIMILARITY_THRESHOLD = 0.7     # Minimum similarity score for quality filtering (0.0-1.0)
+DEFAULT_MAX_SEARCH_WITH_THRESHOLD = 100 # Max candidates to search before filtering (10-1000)
+DEFAULT_MIN_RESULTS_WITH_THRESHOLD = DEFAULT_TOP_K  # Minimum results to return as safety net (1-50)
+
+# Strategy Behavior:
+# - top_k: Returns exactly TOP_K results, no quality filtering
+# - hybrid: Searches MAX_SEARCH candidates, filters by SIMILARITY_THRESHOLD,
+#           falls back to top MIN_RESULTS if insufficient high-quality results
+
+# =============================================================================
+# STRATEGY-SPECIFIC CONFIGURATION EXAMPLES
+# =============================================================================
+
+# High Quality Mode (Strict filtering):
+# DEFAULT_RETRIEVAL_STRATEGY = "hybrid"
+# DEFAULT_SIMILARITY_THRESHOLD = 0.8
+# DEFAULT_MAX_SEARCH_WITH_THRESHOLD = 200
+
+# High Quantity Mode (More results):
+# DEFAULT_RETRIEVAL_STRATEGY = "top_k"
+# DEFAULT_TOP_K = 100
+
+# Balanced Mode (Recommended):
+# DEFAULT_RETRIEVAL_STRATEGY = "hybrid"
+# DEFAULT_SIMILARITY_THRESHOLD = 0.7
+# DEFAULT_MAX_SEARCH_WITH_THRESHOLD = 100
+
+# RAG Configuration (Legacy - kept for compatibility)
 DEFAULT_MAX_ITERATIONS = 10
 
 # API Configuration
@@ -96,6 +130,12 @@ class SystemConfig:
     top_k: int = DEFAULT_TOP_K
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     
+    # RAG Retrieval Strategy Settings
+    retrieval_strategy: str = DEFAULT_RETRIEVAL_STRATEGY
+    similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD
+    max_search_with_threshold: int = DEFAULT_MAX_SEARCH_WITH_THRESHOLD
+    min_results_with_threshold: int = DEFAULT_MIN_RESULTS_WITH_THRESHOLD
+    
     # API Settings
     api_port: int = DEFAULT_API_PORT
     mcp_port: int = DEFAULT_MCP_PORT
@@ -125,7 +165,7 @@ def load_config() -> Config:
         profile_name=PROFILE,
     )
 
-def load_profile(config: Config) -> 'DataProfile':
+def load_profile(config: Config) -> BaseProfile:
     """Load the appropriate data profile based on configuration."""
     try:
         return ProfileFactory.create_profile(config.profile_name)
@@ -172,6 +212,14 @@ def load_system_config() -> SystemConfig:
                 config.top_k = constants.TOP_K
             if hasattr(constants, 'MAX_ITERATIONS'):
                 config.max_iterations = constants.MAX_ITERATIONS
+            if hasattr(constants, 'RETRIEVAL_STRATEGY'):
+                config.retrieval_strategy = constants.RETRIEVAL_STRATEGY
+            if hasattr(constants, 'SIMILARITY_THRESHOLD'):
+                config.similarity_threshold = constants.SIMILARITY_THRESHOLD
+            if hasattr(constants, 'MAX_SEARCH_WITH_THRESHOLD'):
+                config.max_search_with_threshold = constants.MAX_SEARCH_WITH_THRESHOLD
+            if hasattr(constants, 'MIN_RESULTS_WITH_THRESHOLD'):
+                config.min_results_with_threshold = constants.MIN_RESULTS_WITH_THRESHOLD
             if hasattr(constants, 'API_PORT'):
                 config.api_port = constants.API_PORT
             if hasattr(constants, 'MCP_PORT'):
@@ -297,6 +345,30 @@ def get_max_iterations() -> int:
     return config.max_iterations
 
 
+def get_retrieval_strategy() -> str:
+    """Get the retrieval_strategy setting."""
+    config = load_system_config()
+    return config.retrieval_strategy
+
+
+def get_similarity_threshold() -> float:
+    """Get the similarity_threshold setting."""
+    config = load_system_config()
+    return config.similarity_threshold
+
+
+def get_max_search_with_threshold() -> int:
+    """Get the max_search_with_threshold setting."""
+    config = load_system_config()
+    return config.max_search_with_threshold
+
+
+def get_min_results_with_threshold() -> int:
+    """Get the min_results_with_threshold setting."""
+    config = load_system_config()
+    return config.min_results_with_threshold
+
+
 def get_sample_size() -> Optional[int]:
     """Get the sample size."""
     config = load_system_config()
@@ -383,3 +455,46 @@ class LangChainConfig:
         self.langsmith_api_key = config.langsmith_api_key
         self.langsmith_project = config.langsmith_project
         self.enable_tracing = config.enable_tracing
+
+
+# =============================================================================
+# COMMON PROVIDER CONFIGURATION
+# =============================================================================
+
+def get_provider_config(temperature: Optional[float] = None, max_tokens: Optional[int] = None) -> ProviderConfig:
+    """
+    Create a provider configuration using base constants and current profile's API key.
+    
+    This function automatically loads the API key from the current profile's config_api_keys.py
+    and uses the base configuration constants. It eliminates the need for separate provider
+    config files in each profile directory.
+    
+    Args:
+        temperature (Optional[float]): Override temperature (defaults to DEFAULT_TEMPERATURE)
+        max_tokens (Optional[int]): Override max_tokens (defaults to DEFAULT_MAX_TOKENS)
+        
+    Returns:
+        ProviderConfig: Configured provider instance using common defaults and current profile's API key
+    """
+    config = load_system_config()
+    
+    # Automatically load API key from current profile
+    try:
+        profile_module = __import__(f"config.profiles.{config.profile_name}.config_api_keys", fromlist=["GCP_API_KEY"])
+        api_key = getattr(profile_module, "GCP_API_KEY")
+    except (ImportError, AttributeError) as e:
+        from config.logging_config import get_logger
+        logger = get_logger(__name__)
+        logger.error(f"Failed to load API key for profile {config.profile_name}: {e}")
+        raise ValueError(f"Could not load API key for profile {config.profile_name}")
+    
+    return ProviderConfig(
+        provider="google",
+        generation_model=config.generation_model,
+        embedding_model=config.embedding_model,
+        credentials={"api_key": api_key},
+        extras={
+            "temperature": temperature or 0.2,  # Profile-specific override (default is 0.1)
+            "max_tokens": max_tokens or 2048   # Profile-specific override (default is 4000)
+        }
+    )

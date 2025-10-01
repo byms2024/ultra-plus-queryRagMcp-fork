@@ -31,8 +31,14 @@ class CONSTANTS:
     # CHUNK_OVERLAP = 200  # Override default chunk overlap
     
     # RAG Configuration Overrides
+    # RETRIEVAL_STRATEGY = "hybrid"  # Override strategy: "top_k" or "hybrid"
     # TOP_K = 50  # Override default top_k for retrieval
     # MAX_ITERATIONS = 10  # Override default max iterations
+    
+    # Similarity Threshold Configuration Overrides
+    # SIMILARITY_THRESHOLD = 0.7  # Override default similarity threshold (0.0-1.0)
+    # MAX_SEARCH_WITH_THRESHOLD = 100  # Override max candidates to search before filtering
+    # MIN_RESULTS_WITH_THRESHOLD = 50  # Override min results to return (defaults to TOP_K value)
     
     # API Configuration Overrides
     # API_PORT = 8000  # Override default API port
@@ -272,6 +278,6 @@ Available columns: ID, CUSTOMER_ID, FRIDGE_MODEL, BRAND, CAPACITY_LITERS, PRICE,
         return sources
 
     def get_provider_config(self):
-        """Delegate to provider_config module for provider settings."""
-        from .provider_config import get_provider_config as _get
+        """Get provider configuration using common provider config."""
+        from config.base_config import get_provider_config as _get
         return _get()
