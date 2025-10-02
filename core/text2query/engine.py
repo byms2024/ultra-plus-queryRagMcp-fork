@@ -325,6 +325,11 @@ class QuerySynthesisEngine:
                     "method": query_spec.get("synthesis_method", method),
                     "execution_time": query_spec.get("execution_time", 0),
                 }
+                visual_answer = response.get("visual_answer")
+                if visual_answer:
+                    payload["visual_answer"] = visual_answer
+                if response.get("preview"):
+                    payload["preview"] = response["preview"]
                 if attempt_history:
                     total_attempt_time = sum(a["duration"] for a in attempt_history)
                     total_lost_time = sum(
@@ -359,6 +364,11 @@ class QuerySynthesisEngine:
                     "method": query_spec.get("synthesis_method", method),
                     "execution_time": query_spec.get("execution_time", 0),
                 }
+                visual_answer = response.get("visual_answer")
+                if visual_answer:
+                    payload["visual_answer"] = visual_answer
+                if response.get("preview"):
+                    payload["preview"] = response["preview"]
                 if attempt_history:
                     total_attempt_time = sum(a["duration"] for a in attempt_history)
                     total_lost_time = sum(

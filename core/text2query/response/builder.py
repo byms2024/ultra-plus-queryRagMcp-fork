@@ -1,10 +1,14 @@
 """Consolidated response building with formatting and statistics generation."""
 
+import json
+import numpy as np
 import pandas as pd
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from config.profiles import DataProfile
 from config.logging_config import get_rag_logger
 from censor_utils.censoring import CensoringService
+from config.providers.registry import LLMFactory, ProviderConfig
+from config.base_config import load_system_config
 
 logger = get_rag_logger()
 
@@ -18,6 +22,7 @@ class ResponseBuilder:
     def __init__(self, profile: DataProfile):
         self.profile = profile
         self.censor = CensoringService()
+        self.visual_llm = self._initialize_visual_llm()
     
     def build_response(self, 
                       df_result: Optional[pd.DataFrame], 
@@ -31,21 +36,202 @@ class ResponseBuilder:
         table = self._format_dataframe_for_display(df_result)
         sources = self.profile.create_sources_from_df(df_result)
         
-        return {
-            'answer': table, 
-            'sources': sources, 
-            'confidence': 'high', 
+        narrative = self.generate_visual_summary(df_result, query_spec)
+
+        response: Dict[str, Any] = {
+            'answer': narrative if narrative else table,
+            'sources': sources,
+            'confidence': 'high',
             'query_spec': query_spec
         }
+
+        if narrative:
+            response['visual_answer'] = {'markdown': narrative}
+            if table:
+                response.setdefault('preview', {})['table_csv'] = table
+
+        return response
     
     def _build_empty_response(self, query_spec: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Build response when no results are found."""
-        return {
-            'answer': 'No matching rows for your request.', 
-            'sources': [], 
-            'confidence': 'low', 
+        empty_response = {
+            'answer': 'No matching rows for your request.',
+            'sources': [],
+            'confidence': 'low',
             'query_spec': query_spec
         }
+
+        if self.visual_llm:
+            visual_summary = self._safe_visual_call(
+                base_payload={
+                    'summary': 'No matching data was returned for the requested filters.',
+                    'row_count': 0,
+                    'column_names': [],
+                    'query_spec': query_spec or {}
+                }
+            )
+            if visual_summary:
+                empty_response['answer'] = visual_summary
+                empty_response['visual_answer'] = {'markdown': visual_summary}
+
+        return empty_response
+
+    def _initialize_visual_llm(self):
+        try:
+            provider_config = self.profile.get_provider_config()
+            # Allow profiles to opt-out by omitting generation model
+            if not getattr(provider_config, 'generation_model', None):
+                logger.info("Visual LLM skipped: no generation model configured")
+                return None
+
+            # Clone provider configuration to avoid mutating shared instance
+            cloned_config = ProviderConfig(
+                provider=provider_config.provider,
+                generation_model=provider_config.generation_model,
+                embedding_model=provider_config.embedding_model,
+                credentials=dict(getattr(provider_config, 'credentials', {}) or {}),
+                extras=dict(getattr(provider_config, 'extras', {}) or {}),
+            )
+
+            config = load_system_config()
+            timeout = getattr(config, 'llm_request_timeout_seconds', 60)
+            extras = cloned_config.extras
+            if isinstance(extras, dict):
+                extras.setdefault('temperature', 0.15)
+                extras.setdefault('max_tokens', min(4096, extras.get('max_tokens', 4096)))
+
+            logger.info("Initializing visual enrichment LLM")
+            llm = LLMFactory.create(cloned_config)
+            setattr(llm, '_visual_timeout', timeout)
+            return llm
+        except Exception as exc:
+            logger.warning(f"Visual enrichment LLM unavailable: {exc}")
+            return None
+
+    def _describe_dataframe(self, df: pd.DataFrame, max_rows: int = 20) -> Tuple[str, int]:
+        truncated = df.head(max_rows)
+        description = truncated.to_json(orient='split')
+        return description, len(df)
+
+    def _construct_visual_prompt(self, df: pd.DataFrame, query_spec: Optional[Dict[str, Any]]) -> str:
+        table_json, total_rows = self._describe_dataframe(df)
+        columns_meta = []
+        for column in df.columns:
+            col_data = df[column]
+            columns_meta.append({
+                'name': column,
+                'dtype': str(col_data.dtype),
+                'sample_values': col_data.dropna().astype(str).head(5).tolist()
+            })
+
+        stats_snapshot = self.get_basic_stats(df)
+
+        prompt_payload = {
+            'instruction': (
+                "Produce a plain Markdown report (<= 200 words) with the final result of the query. "
+                "Use native Markdown elements—headings, numbered or bulleted lists, tables, and emoji icons when helpful—to illustrate the data. "
+                "Do not include JSON, code fences, or mermaid diagrams; respond with Markdown only."
+            ),
+            'query_spec': query_spec or {},
+            'schema': columns_meta,
+            'row_count': total_rows,
+            'table_preview_json': table_json,
+            'basic_stats': stats_snapshot
+        }
+
+        sanitized_payload = self._sanitize_for_json(prompt_payload)
+        return json.dumps(sanitized_payload)
+
+    def _safe_visual_call(self, base_payload: Dict[str, Any]) -> Optional[str]:
+        if not self.visual_llm:
+            return None
+
+        try:
+            timeout = getattr(self.visual_llm, '_visual_timeout', 60)
+            instruction = (
+                "Return a concise plain-Markdown summary of the provided context. "
+                "Include the final result of the query and optionally Markdown tables, numbered or bulleted lists, and emoji icons to highlight insights. "
+                "Be Precise and concise. Prefer lists over tables. Do not return JSON, code fences, or mermaid diagrams—respond with Markdown only."
+            )
+
+            sanitized_context = self._sanitize_for_json(base_payload)
+            payload_dict = {'instruction': instruction, 'context': sanitized_context}
+            sanitized_payload = self._sanitize_for_json(payload_dict)
+            payload = json.dumps(sanitized_payload)
+
+            raw_response = self.visual_llm.invoke(payload, config={'timeout': timeout})
+
+            if hasattr(raw_response, 'content'):
+                response_text = str(raw_response.content)
+            else:
+                response_text = str(raw_response)
+
+            response_text = response_text.strip()
+
+            if not response_text:
+                logger.warning("Visual LLM returned empty response")
+                return None
+
+            return response_text
+        except Exception as exc:
+            logger.warning(f"Visual enrichment failed: {exc}")
+
+        return None
+
+    def generate_visual_summary(
+        self,
+        df: Optional[pd.DataFrame],
+        query_spec: Optional[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Generate a user-friendly markdown summary with visuals based on DataFrame."""
+
+        if df is None or df.empty:
+            return None
+
+        prompt = self._construct_visual_prompt(df, query_spec)
+
+        base_payload = {
+            'prompt': prompt,
+            'query_spec': query_spec or {}
+        }
+
+        enriched = self._safe_visual_call(base_payload)
+        if not enriched:
+            return None
+
+        return enriched
+
+    def _sanitize_for_json(self, value: Any) -> Any:
+        """Recursively convert values into JSON-serializable primitives."""
+
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+
+        if isinstance(value, (np.generic,)):
+            return value.item()
+
+        if isinstance(value, pd.Timestamp):
+            return value.isoformat()
+
+        if isinstance(value, pd.Series):
+            return [self._sanitize_for_json(v) for v in value.tolist()]
+
+        if isinstance(value, pd.Index):
+            return [self._sanitize_for_json(v) for v in value.tolist()]
+
+        if isinstance(value, dict):
+            return {str(k): self._sanitize_for_json(v) for k, v in value.items()}
+
+        if isinstance(value, (list, tuple, set)):
+            return [self._sanitize_for_json(v) for v in value]
+
+        if hasattr(value, 'item') and callable(getattr(value, 'item')):
+            try:
+                return value.item()
+            except Exception:
+                pass
+
+        return str(value)
     
     def _format_dataframe_for_display(self, 
                                     df: pd.DataFrame, 
