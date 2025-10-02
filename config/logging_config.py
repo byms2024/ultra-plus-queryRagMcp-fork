@@ -137,7 +137,7 @@ def setup_logging(
         api_logger = logging.getLogger("api")
         api_logger.setLevel(logging.INFO)
         api_logger.addHandler(api_handler)
-        api_logger.propagate = False  # Don't propagate to root logger
+        api_logger.propagate = True  # Don't propagate to root logger
 
         # RAG engine log
         rag_log_file = LOGS_DIR / "rag.log"
@@ -154,7 +154,7 @@ def setup_logging(
         rag_logger = logging.getLogger("rag")
         rag_logger.setLevel(logging.INFO)
         rag_logger.addHandler(rag_handler)
-        rag_logger.propagate = False
+        rag_logger.propagate = True
 
         # Server log
         server_log_file = LOGS_DIR / "server.log"
@@ -171,7 +171,7 @@ def setup_logging(
         server_logger = logging.getLogger("server")
         server_logger.setLevel(logging.INFO)
         server_logger.addHandler(server_handler)
-        server_logger.propagate = False
+        server_logger.propagate = True
 
         # Route uvicorn access logs into api logger file as well
         uvicorn_access_logger = logging.getLogger("uvicorn.access")
