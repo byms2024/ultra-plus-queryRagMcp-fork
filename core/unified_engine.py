@@ -203,6 +203,95 @@ class UnifiedQueryEngine:
         # Default: try Text2Query first (conservative approach)
         return False
     
+    def answer_question_partial(self, question: str, method: str = "auto") -> Dict[str, Any]:
+        """
+        Answer a question and return intermediate data for streaming.
+        
+        Args:
+            question: Natural language question
+            method: "auto", "text2query", "rag", or "both"
+        
+        Returns:
+            Dictionary with df_result, query_spec, response_builder, and metadata
+            for streaming visual summary generation
+        """
+        logger.info(f"Processing question (partial for streaming): {question}")
+        start_time = time.time()
+        
+        try:
+            # Intelligent routing
+            skip_text2query = False
+            if method == "auto":
+                skip_text2query = self._should_use_rag_directly(question)
+            
+            if (method == "auto" or method == "text2query") and not skip_text2query:
+                if self.text2query_engine:
+                    # Use the new execute_query_for_streaming method that doesn't generate visual summary
+                    result = self.text2query_engine.execute_query_for_streaming(question, method)
+                    
+                    if result and not result.get('error'):
+                        # Success - return with response_builder for streaming
+                        result["response_builder"] = self.text2query_engine.response_builder
+                        result["method_used"] = result.get("method", "text2query")
+                        result["timestamp"] = datetime.now().isoformat()
+                        result["profile"] = self.profile.profile_name
+                        return result
+            
+            # Fallback to RAG (doesn't support streaming)
+            if method == "auto" or method == "rag":
+                if self.rag_agent:
+                    rag_start = time.time()
+                    logger.info("⏳ Attempting RAG approach (fallback - no streaming)...")
+                    rag_result = self.rag_agent.answer_question(question)
+                    rag_duration = time.time() - rag_start
+                    
+                    if rag_result and rag_result.get('answer'):
+                        # RAG doesn't have DataFrame, so no streaming possible
+                        return {
+                            "df_result": None,
+                            "query_spec": None,
+                            "response_builder": None,
+                            "sources": rag_result.get("sources", []),
+                            "confidence": rag_result.get("confidence", "medium"),
+                            "method_used": "rag",
+                            "execution_time": time.time() - start_time,
+                            "timestamp": datetime.now().isoformat(),
+                            "profile": self.profile.profile_name,
+                            "answer": rag_result.get("answer", ""),
+                            "stats": {}
+                        }
+            
+            # No result from any method
+            return {
+                "df_result": None,
+                "query_spec": None,
+                "response_builder": None,
+                "sources": [],
+                "confidence": "low",
+                "method_used": "none",
+                "execution_time": time.time() - start_time,
+                "timestamp": datetime.now().isoformat(),
+                "profile": self.profile.profile_name,
+                "answer": "I'm sorry, I couldn't find an answer to your question.",
+                "error": "No result from any method"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing question (partial): {e}")
+            return {
+                "df_result": None,
+                "query_spec": None,
+                "response_builder": None,
+                "sources": [],
+                "confidence": "low",
+                "method_used": "error",
+                "execution_time": time.time() - start_time,
+                "timestamp": datetime.now().isoformat(),
+                "profile": self.profile.profile_name,
+                "answer": f"Error: {e}",
+                "error": str(e)
+            }
+    
     def answer_question(self, question: str, method: str = "auto") -> Dict[str, Any]:
         """
         Answer a question using the unified approach.

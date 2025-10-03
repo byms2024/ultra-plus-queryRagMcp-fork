@@ -41,7 +41,7 @@ class QuerySynthesisEngine:
         
         # Initialize LLM provider (shared across all methods)
         self.llm_provider = self._create_llm_provider()
-        logger.info(f"LLM provider initialized: {self.llm_provider}")
+        logger.info(f"[engine] LLM provider initialized: {self.llm_provider}")
         # Initialize censoring with profile mappings
         self.censor = CensoringService()
         logger.info(f"Censoring service initialized: {self.censor}")
@@ -77,21 +77,21 @@ class QuerySynthesisEngine:
         try:
             # Initialize traditional synthesizer
             self.traditional_synthesizer = QuerySynthesizer(self.config, self.profile)
-            logger.info("Traditional synthesizer initialized")
+            logger.info("[engine] Traditional synthesizer initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize traditional synthesizer: {e}")
         
         try:
             # Initialize LangChain synthesizer
             self.langchain_synthesizer = LangChainQuerySynthesizer(self.config, self.profile)
-            logger.info("LangChain synthesizer initialized")
+            logger.info("[engine] LangChain synthesizer initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize LangChain synthesizer: {e}")
         
         try:
             # Initialize LangChain agent
             self.langchain_agent = LangChainAgentEngine(self.config, self.profile)
-            logger.info("LangChain agent initialized")
+            logger.info("[engine] LangChain agent initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize LangChain agent: {e}")
     
@@ -170,20 +170,20 @@ class QuerySynthesisEngine:
             method = self._select_best_method(question, self.df)
         
         logger.info(
-            f"📋 Using synthesis method: {method}"
+            f"[engine] 📋 Using synthesis method: {method}"
             + (f" (requested: {original_method})" if original_method != method else "")
         )
         
         try:
             start_time = time.time()
-            logger.info(f"🔄 Starting synthesis with {method}...")
+            logger.info(f"[engine] 🔄 Starting synthesis with {method}...")
             result = self._synthesize_with_method(method, question)
             execution_time = time.time() - start_time
             
             # Update performance stats
             self._update_performance_stats(method, True, execution_time)
             
-            logger.info(f"✅ Synthesis completed with {method} in {execution_time:.2f}s")
+            logger.info(f"[engine] ✅ Synthesis completed with {method} in {execution_time:.2f}s")
 
             attempt_history.append(
                 {
@@ -209,7 +209,7 @@ class QuerySynthesisEngine:
             
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"❌ Synthesis failed with method {method} after {execution_time:.2f}s: {e}")
+            logger.error(f"[engine] ❌ Synthesis failed with method {method} after {execution_time:.2f}s: {e}")
             self._update_performance_stats(method, False, 0)
 
             attempt_history.append(
@@ -226,12 +226,12 @@ class QuerySynthesisEngine:
             # Try fallback methods
             if method != "traditional" and self.traditional_synthesizer:
                 logger.info(
-                    f"🔄 Trying traditional method as fallback (cumulative lost time: {lost_time:.2f}s)"
+                    f"[engine] 🔄 Trying traditional method as fallback (cumulative lost time: {lost_time:.2f}s)"
                 )
                 return self.synthesize_query(question, "traditional", attempt_history)
             elif method != "langchain_direct" and self.langchain_synthesizer:
                 logger.info(
-                    f"🔄 Trying LangChain direct method as fallback (cumulative lost time: {lost_time:.2f}s)"
+                    f"[engine] 🔄 Trying LangChain direct method as fallback (cumulative lost time: {lost_time:.2f}s)"
                 )
                 return self.synthesize_query(question, "langchain_direct", attempt_history)
             
@@ -273,7 +273,7 @@ class QuerySynthesisEngine:
         try:
             # Synthesize the query
             synthesis_start = time.time()
-            logger.info(f"🔍 Starting query synthesis...")
+            logger.info(f"[engine] 🔍 Starting query synthesis...")
             query_spec = self.synthesize_query(question, method)
             synthesis_time = time.time() - synthesis_start
             attempt_history = (
@@ -283,7 +283,7 @@ class QuerySynthesisEngine:
             )
             
             if not query_spec or "error" in query_spec:
-                logger.warning(f"⚠️ Synthesis returned error after {synthesis_time:.2f}s")
+                logger.warning(f"[engine] ⚠️ Synthesis returned error after {synthesis_time:.2f}s")
                 response = {
                     "answer": f"Error: {query_spec.get('error', 'Synthesis failed') if query_spec else 'No result'}",
                     "sources": [],
@@ -297,7 +297,7 @@ class QuerySynthesisEngine:
                         a["duration"] for a in attempt_history if not a["success"]
                     )
                     logger.info(
-                        "⏱️ Text2Query attempts exhausted | total_attempt_time=%.2fs | total_lost_time=%.2fs | attempts=%s",
+                        "[engine] ⏱️ Text2Query attempts exhausted | total_attempt_time=%.2fs | total_lost_time=%.2fs | attempts=%s",
                         total_attempt_time,
                         total_lost_time,
                         ", ".join(
@@ -313,10 +313,10 @@ class QuerySynthesisEngine:
             # Execute the query based on its type
             if query_spec.get("query_type") in ["langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent"]:
                 # LangChain methods return results directly
-                logger.info(f"⚡ Building response from LangChain result...")
+                logger.info(f"[engine] ⚡ Building response from LangChain result...")
                 response = self.response_builder.build_response(query_spec.get("result"), query_spec)
                 total_time = time.time() - query_start
-                logger.info(f"✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s)")
+                logger.info(f"[engine] ✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s)")
                 payload = {
                     "answer": response.get("answer", ""),
                     "sources": response.get("sources", []),
@@ -324,6 +324,8 @@ class QuerySynthesisEngine:
                     "stats": self._generate_stats_from_result(query_spec.get("result")),
                     "method": query_spec.get("synthesis_method", method),
                     "execution_time": query_spec.get("execution_time", 0),
+                    "df_result": query_spec.get("result"),  # Add df_result for streaming
+                    "query_spec": query_spec,  # Add query_spec for streaming
                 }
                 visual_answer = response.get("visual_answer")
                 if visual_answer:
@@ -339,7 +341,7 @@ class QuerySynthesisEngine:
                     payload["total_attempt_time"] = total_attempt_time
                     payload["total_lost_time"] = total_lost_time
                     logger.info(
-                        "⏱️ Text2Query attempts summary | total_attempt_time=%.2fs | total_lost_time=%.2fs",
+                        "[engine] ⏱️ Text2Query attempts summary | total_attempt_time=%.2fs | total_lost_time=%.2fs",
                         total_attempt_time,
                         total_lost_time,
                     )
@@ -347,15 +349,15 @@ class QuerySynthesisEngine:
             else:
                 # Traditional method needs execution via QueryExecutor
                 exec_start = time.time()
-                logger.info(f"⚡ Executing traditional query...")
+                logger.info(f"[engine] ⚡ Executing traditional query...")
                 executor = QueryExecutor(self.profile)
                 df_result = executor.apply(self.df, query_spec)
                 exec_time = time.time() - exec_start
                 
-                logger.info(f"⚡ Building response...")
+                logger.info(f"[engine] ⚡ Building response...")
                 response = self.response_builder.build_response(df_result, query_spec)
                 total_time = time.time() - query_start
-                logger.info(f"✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s, execution: {exec_time:.2f}s)")
+                logger.info(f"[engine] ✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s, execution: {exec_time:.2f}s)")
                 payload = {
                     "answer": response.get("answer", ""),
                     "sources": response.get("sources", []),
@@ -363,6 +365,8 @@ class QuerySynthesisEngine:
                     "stats": self._generate_stats_from_result(df_result),
                     "method": query_spec.get("synthesis_method", method),
                     "execution_time": query_spec.get("execution_time", 0),
+                    "df_result": df_result,  # Add df_result for streaming
+                    "query_spec": query_spec,  # Add query_spec for streaming
                 }
                 visual_answer = response.get("visual_answer")
                 if visual_answer:
@@ -378,7 +382,7 @@ class QuerySynthesisEngine:
                     payload["total_attempt_time"] = total_attempt_time
                     payload["total_lost_time"] = total_lost_time
                     logger.info(
-                        "⏱️ Text2Query attempts summary | total_attempt_time=%.2fs | total_lost_time=%.2fs",
+                        "[engine] ⏱️ Text2Query attempts summary | total_attempt_time=%.2fs | total_lost_time=%.2fs",
                         total_attempt_time,
                         total_lost_time,
                     )
@@ -405,6 +409,73 @@ class QuerySynthesisEngine:
         elif pd.api.types.is_scalar(result):
             return [{"result": str(result)}]
         return []
+    
+    def execute_query_for_streaming(self, question: str, method: str = "auto") -> Dict[str, Any]:
+        """
+        Execute query and return raw DataFrame without generating visual summary.
+        Used for streaming visual summary generation.
+        
+        Returns dict with df_result, query_spec, and metadata but NO visual summary.
+        """
+        query_start = time.time()
+        try:
+            # Synthesize the query
+            synthesis_start = time.time()
+            logger.info(f"[engine] 🔍 Starting query synthesis for streaming...")
+            query_spec = self.synthesize_query(question, method)
+            synthesis_time = time.time() - synthesis_start
+            
+            if not query_spec or query_spec.get("error"):
+                error_msg = query_spec.get("error", "Unknown synthesis error") if query_spec else "Synthesis failed"
+                return {
+                    "df_result": None,
+                    "query_spec": None,
+                    "error": error_msg,
+                    "sources": [],
+                    "confidence": "low",
+                    "method": method,
+                    "execution_time": time.time() - query_start
+                }
+            
+            # Execute based on query type
+            if query_spec.get("query_type") in ["langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent"]:
+                # LangChain methods - result is already in query_spec
+                df_result = query_spec.get("result")
+            else:
+                # Traditional method - need to execute
+                executor = QueryExecutor(self.profile)
+                df_result = executor.apply(self.df, query_spec)
+            
+            # Build metadata WITHOUT visual summary
+            if df_result is None or (isinstance(df_result, pd.DataFrame) and df_result.empty):
+                sources = []
+                table_preview = None
+            else:
+                table_preview = self.response_builder._format_dataframe_for_display(df_result)
+                sources = self.profile.create_sources_from_df(df_result)
+            
+            return {
+                "df_result": df_result,
+                "query_spec": query_spec,
+                "sources": sources,
+                "confidence": "high" if df_result is not None and len(sources) > 0 else "medium",
+                "method": query_spec.get("synthesis_method", method),
+                "execution_time": time.time() - query_start,
+                "table_preview": table_preview,
+                "stats": self._generate_stats_from_result(df_result)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Query execution for streaming failed: {e}")
+            return {
+                "df_result": None,
+                "query_spec": None,
+                "error": str(e),
+                "sources": [],
+                "confidence": "low",
+                "method": method,
+                "execution_time": time.time() - query_start
+            }
     
     def _generate_stats_from_result(self, result: Union[pd.DataFrame, pd.Series, Any]) -> Dict[str, Any]:
         """Generate statistics from query result."""
