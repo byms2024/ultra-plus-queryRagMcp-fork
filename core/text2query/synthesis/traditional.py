@@ -17,6 +17,7 @@ class QuerySynthesizer:
     def __init__(self, config: Config, profile: DataProfile):
         self.config = config
         self.profile = profile
+        self.strategy_name = "traditional"
         
         # Create LLM provider using the profile's provider configuration
         provider_config = profile.get_provider_config()
@@ -58,7 +59,7 @@ class QuerySynthesizer:
             )
 
             # Log before LLM call
-            logger.info("🤖 Calling LLM (traditional synthesis)...")
+            logger.info(f"[{self.strategy_name}] 🤖 Calling LLM (traditional synthesis)...")
             llm_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
             llm_start = time.time()
             try:
@@ -66,10 +67,10 @@ class QuerySynthesizer:
                     future = executor.submit(self.llm_provider.invoke, system_rules + "\n" + schema_hint + "\n" + prompt)
                     response = future.result(timeout=llm_timeout)
             except FuturesTimeoutError:
-                logger.warning(f"⏱️ LLM call timed out after {llm_timeout:.2f}s (traditional)")
+                logger.warning(f"[{self.strategy_name}] ⏱️ LLM call timed out after {llm_timeout:.2f}s")
                 return None
             llm_duration = time.time() - llm_start
-            logger.info(f"✅ LLM response received in {llm_duration:.2f}s")
+            logger.info(f"[{self.strategy_name}] ✅ LLM response received in {llm_duration:.2f}s")
             
             # Handle LangChain response format
             if hasattr(response, 'content'):

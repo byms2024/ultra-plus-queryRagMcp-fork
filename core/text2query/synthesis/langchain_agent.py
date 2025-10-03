@@ -27,6 +27,7 @@ class LangChainAgentEngine:
     def __init__(self, config: Config, profile: DataProfile):
         self.config = config
         self.profile = profile
+        self.strategy_name = "langchain_agent"
         
         # Create LangChain provider using the profile's provider configuration
         provider_config = profile.get_provider_config()
@@ -59,7 +60,7 @@ class LangChainAgentEngine:
             if not agent:
                 raise RuntimeError("Failed to create LangChain agent")
             
-            logger.info("LangChain agent created successfully")
+            logger.info(f"[{self.strategy_name}] LangChain agent created successfully")
             return agent
             
         except Exception as e:
@@ -84,13 +85,13 @@ class LangChainAgentEngine:
             context_query = self._build_context_query(query, df)
             
             # Run the agent query
-            logger.info(f"🤖 Running LangChain agent query...")
+            logger.info(f"[{self.strategy_name}] 🤖 Running LangChain agent query...")
             agent_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
             agent_start = time.time()
             # Note: Agent.run may block; unified engine also has a budget timeout.
             result = agent.run(context_query)
             agent_duration = time.time() - agent_start
-            logger.info(f"✅ Agent query completed in {agent_duration:.2f}s")
+            logger.info(f"[{self.strategy_name}] ✅ Agent query completed in {agent_duration:.2f}s")
             
             return str(result)
             

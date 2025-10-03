@@ -41,7 +41,7 @@ class GenericRAGAgent:
     
     def _initialize_components(self, provider_config: ProviderConfig | None = None):
         """Initialize all LangChain components."""
-        logger.info("Initializing generic RAG components...")
+        logger.info("[rag] Initializing generic RAG components...")
         
         # Initialize LLM and embeddings via provider-agnostic factories
         if provider_config is None:
@@ -90,7 +90,7 @@ class GenericRAGAgent:
         # Initialize agent
         self._initialize_agent()
         
-        logger.info("Generic RAG components initialized successfully")
+        logger.info("[rag] Generic RAG components initialized successfully")
     
     def _initialize_retrieval_strategy(self):
         """
@@ -102,7 +102,7 @@ class GenericRAGAgent:
         The strategy is then used in search_relevant_chunks to perform
         retrieval operations according to the configured strategy.
         """
-        logger.info("Initializing retrieval strategy...")
+        logger.info("[rag] Initializing retrieval strategy...")
         
         try:
             # Create RAGConfig from current configuration
@@ -118,19 +118,19 @@ class GenericRAGAgent:
             # Create strategy using factory
             self.retrieval_strategy = StrategyFactory.create_strategy(rag_config)
             
-            logger.info(f"Retrieval strategy initialized: {self.retrieval_strategy.get_strategy_name()}")
-            logger.info(f"Strategy description: {self.retrieval_strategy.get_strategy_description()}")
+            logger.info(f"[rag] Retrieval strategy initialized: {self.retrieval_strategy.get_strategy_name()}")
+            logger.info(f"[rag] Strategy description: {self.retrieval_strategy.get_strategy_description()}")
             
         except Exception as e:
             logger.error(f"Failed to initialize retrieval strategy: {e}")
             # Fallback to top_k strategy
             fallback_config = RAGConfig(retrieval_strategy="top_k", top_k=50)
             self.retrieval_strategy = StrategyFactory.create_strategy(fallback_config)
-            logger.warning(f"Using fallback strategy: {self.retrieval_strategy.get_strategy_name()}")
+            logger.warning(f"[rag] Using fallback strategy: {self.retrieval_strategy.get_strategy_name()}")
     
     def _load_and_process_data(self):
         """Load and process data, then build vector store."""
-        logger.info("Loading and processing data...")
+        logger.info("[rag] Loading and processing data...")
         
         # Load and process data
         df = self.data_processor.load_and_process_data()
@@ -147,7 +147,7 @@ class GenericRAGAgent:
         # Get sensitive mapping
         self.sensitive_mapping = self.data_processor.get_sensitive_mapping()
         
-        logger.info(f"Data processing complete: {len(documents)} documents, {len(chunks)} chunks")
+        logger.info(f"[rag] Data processing complete: {len(documents)} documents, {len(chunks)} chunks")
     
     def _initialize_qa_chain(self):
         """Initialize the QA chain."""
@@ -169,7 +169,7 @@ class GenericRAGAgent:
             return_source_documents=True
         )
         
-        logger.info("QA chain initialized")
+        logger.info("[rag] QA chain initialized")
     
     def _get_prompt_template(self) -> PromptTemplate:
         """Get the prompt template for QA."""
@@ -216,7 +216,7 @@ Answer:"""
         self.agent = create_tool_calling_agent(self.llm, tools, agent_prompt)
         self.agent_executor = AgentExecutor(agent=self.agent, tools=tools, verbose=True)
         
-        logger.info("Agent initialized")
+        logger.info("[rag] Agent initialized")
     
     def _search_tool(self, query: str) -> str:
         """Tool for searching data."""
@@ -257,7 +257,7 @@ Answer:"""
     def answer_question(self, question: str) -> Dict[str, Any]:
         """Answer a question using the RAG system."""
         try:
-            logger.info(f"Answering question: {question}")
+            logger.info(f"[rag] Answering question: {question}")
             
             # Use QA chain
             result = self.qa_chain.invoke({"query": question})
