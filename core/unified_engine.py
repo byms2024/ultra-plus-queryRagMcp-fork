@@ -237,29 +237,27 @@ class UnifiedQueryEngine:
                         result["profile"] = self.profile.profile_name
                         return result
             
-            # Fallback to RAG (doesn't support streaming)
+            # Fallback to RAG (now supports streaming!)
             if method == "auto" or method == "rag":
                 if self.rag_agent:
                     rag_start = time.time()
-                    logger.info("⏳ Attempting RAG approach (fallback - no streaming)...")
-                    rag_result = self.rag_agent.answer_question(question)
-                    rag_duration = time.time() - rag_start
+                    logger.info("⏳ Attempting RAG approach (fallback - with streaming)...")
                     
-                    if rag_result and rag_result.get('answer'):
-                        # RAG doesn't have DataFrame, so no streaming possible
-                        return {
-                            "df_result": None,
-                            "query_spec": None,
-                            "response_builder": None,
-                            "sources": rag_result.get("sources", []),
-                            "confidence": rag_result.get("confidence", "medium"),
-                            "method_used": "rag",
-                            "execution_time": time.time() - start_time,
-                            "timestamp": datetime.now().isoformat(),
-                            "profile": self.profile.profile_name,
-                            "answer": rag_result.get("answer", ""),
-                            "stats": {}
-                        }
+                    # Return RAG streaming data
+                    return {
+                        "df_result": None,
+                        "query_spec": None,
+                        "response_builder": None,
+                        "sources": [],  # Will be populated from stream
+                        "confidence": "medium",  # Will be updated from stream
+                        "method_used": "rag",
+                        "execution_time": time.time() - start_time,
+                        "timestamp": datetime.now().isoformat(),
+                        "profile": self.profile.profile_name,
+                        "rag_question": question,  # Pass question for streaming
+                        "rag_agent": self.rag_agent,  # Pass agent for streaming
+                        "stats": {}
+                    }
             
             # No result from any method
             return {

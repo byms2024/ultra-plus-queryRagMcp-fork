@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, AsyncIterator
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
@@ -289,6 +289,62 @@ Answer:"""
                 "confidence": "low",
                 "timestamp": datetime.now().isoformat()
             }
+    
+    async def answer_question_stream(self, question: str) -> Tuple[AsyncIterator[str], List[Dict[str, Any]], str]:
+        """
+        Answer a question using RAG with streaming response.
+        
+        Returns:
+            Tuple of (stream_iterator, sources, confidence)
+            - stream_iterator: AsyncIterator yielding answer chunks
+            - sources: List of source documents
+            - confidence: Confidence level
+        """
+        try:
+            logger.info(f"[rag] Answering question with streaming: {question}")
+            
+            # First, retrieve relevant documents
+            docs = self.retriever.get_relevant_documents(question)
+            
+            # Extract sources
+            sources = []
+            for doc in docs:
+                source = {
+                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                    "metadata": doc.metadata
+                }
+                sources.append(source)
+            
+            # Determine confidence based on source quality
+            confidence = "high" if len(sources) >= 3 else "medium" if len(sources) >= 1 else "low"
+            
+            # Create context from retrieved documents
+            context = "\n\n".join([doc.page_content for doc in docs[:5]])  # Use top 5 docs
+            
+            # Create streaming prompt
+            prompt_template = self._get_prompt_template()
+            prompt_text = prompt_template.format(context=context, question=question)
+            
+            # Stream from LLM
+            async def stream_generator():
+                async for chunk in self.llm.astream(prompt_text):
+                    if hasattr(chunk, 'content'):
+                        content = str(chunk.content)
+                    else:
+                        content = str(chunk)
+                    
+                    if content:
+                        yield content
+            
+            return stream_generator(), sources, confidence
+            
+        except Exception as e:
+            logger.error(f"[rag] Error in streaming answer: {e}")
+            # Return error as a simple async generator
+            async def error_generator():
+                yield f"Error processing question: {e}"
+            
+            return error_generator(), [], "low"
     
     def search_relevant_chunks(
         self, 
