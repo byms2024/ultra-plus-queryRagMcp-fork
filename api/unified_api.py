@@ -275,16 +275,19 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                     'num_sources': len(result.get('sources', []))
                 }
 
-                if result.get('table_preview'):
-                    preview_data['table_preview'] = result['table_preview']
+                # if result.get('table_preview'):
+                #     preview_data['table_preview'] = result['table_preview']
 
                 yield f"data: {json.dumps(preview_data)}\n\n"
 
-                # Step 4: Stream the visual summary
+                # Step 4: Stream the response (either visual summary or RAG answer)
                 df_result = result.get('df_result')
                 query_spec = result.get('query_spec')
+                rag_agent = result.get('rag_agent')
+                rag_question = result.get('rag_question')
 
                 if df_result is not None and not df_result.empty:
+                    # Text2Query path - stream visual summary
                     yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
 
                     response_builder = result.get('response_builder')
@@ -298,7 +301,31 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                                 yield f"data: {json.dumps(chunk_data)}\n\n"
 
                     yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
+                    
+                elif rag_agent and rag_question:
+                    # RAG path - stream RAG answer
+                    yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
+                    
+                    # Call RAG streaming method
+                    stream_gen, rag_sources, rag_confidence = await rag_agent.answer_question_stream(rag_question)
+                    
+                    # Update result with RAG metadata
+                    result['sources'] = rag_sources
+                    result['confidence'] = rag_confidence
+                    
+                    # Stream RAG response
+                    async for chunk in stream_gen:
+                        if chunk:
+                            chunk_data = {
+                                'event': 'visual_chunk',
+                                'chunk': chunk
+                            }
+                            yield f"data: {json.dumps(chunk_data)}\n\n"
+                    
+                    yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
+                    
                 else:
+                    # Fallback - no streaming data available
                     answer_data = {
                         'event': 'answer',
                         'answer': result.get('answer', 'No results found.')
