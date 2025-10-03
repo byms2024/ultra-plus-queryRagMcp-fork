@@ -9,10 +9,12 @@ import os
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
+import json
+import asyncio
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config.base_config import load_system_config, get_profile
@@ -240,6 +242,99 @@ async def ask_question(request: QuestionRequest, engine: UnifiedQueryEngine = De
     except Exception as e:
         logger.error(f"Error processing question: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing question: {e}")
+
+@app.post("/ask/stream")
+async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngine = Depends(get_unified_engine)):
+    """
+    Ask a question using the unified system with streaming visual summary.
+    The system will stream the visual summary generation in real-time using Server-Sent Events (SSE).
+    """
+    try:
+        logger.info(f"Processing streaming question: {request.question} (method: {request.method})")
+
+        async def event_generator():
+            """Generate SSE events for the streaming response."""
+            try:
+                # Step 1: Send initial metadata
+                yield f"data: {json.dumps({'event': 'start', 'question': request.question})}\n\n"
+
+                # Step 2: Execute the query (non-streaming part)
+                result = await asyncio.to_thread(
+                    engine.answer_question_partial,
+                    request.question,
+                    request.method
+                )
+
+                # Step 3: Send the table/preview data immediately (WITHOUT sources to reduce payload)
+                preview_data = {
+                    'event': 'preview',
+                    'confidence': result.get('confidence', 'medium'),
+                    'method_used': result.get('method_used', 'unknown'),
+                    'timestamp': result.get('timestamp', datetime.now().isoformat()),
+                    'profile': result.get('profile', 'unknown'),
+                    'num_sources': len(result.get('sources', []))
+                }
+
+                if result.get('table_preview'):
+                    preview_data['table_preview'] = result['table_preview']
+
+                yield f"data: {json.dumps(preview_data)}\n\n"
+
+                # Step 4: Stream the visual summary
+                df_result = result.get('df_result')
+                query_spec = result.get('query_spec')
+
+                if df_result is not None and not df_result.empty:
+                    yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
+
+                    response_builder = result.get('response_builder')
+                    if response_builder:
+                        async for chunk in response_builder.generate_visual_summary_stream(df_result, query_spec):
+                            if chunk:
+                                chunk_data = {
+                                    'event': 'visual_chunk',
+                                    'chunk': chunk
+                                }
+                                yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                    yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
+                else:
+                    answer_data = {
+                        'event': 'answer',
+                        'answer': result.get('answer', 'No results found.')
+                    }
+                    yield f"data: {json.dumps(answer_data)}\n\n"
+
+                # Step 5: Send completion event with final metadata including sources
+                completion_data = {
+                    'event': 'done',
+                    'sources': result.get('sources', []),
+                    'execution_time': result.get('execution_time', 0),
+                    'stats': result.get('stats', {})
+                }
+                yield f"data: {json.dumps(completion_data)}\n\n"
+
+            except Exception as e:
+                logger.error(f"Error in stream generator: {e}")
+                error_data = {
+                    'event': 'error',
+                    'error': str(e)
+                }
+                yield f"data: {json.dumps(error_data)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing streaming question: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing streaming question: {e}")
 
 @app.post("/search", response_model=SearchResponse)
 async def search_data(request: SearchRequest, engine: UnifiedQueryEngine = Depends(get_unified_engine)):
