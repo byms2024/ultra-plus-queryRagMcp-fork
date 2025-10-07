@@ -198,11 +198,11 @@ class BaseProfile(ABC):
         1. Use only the provided context information to answer the question.
         2. Be specific and cite relevant data when appropriate.
         3. If there is not enough information to answer, state that clearly.
-        4. Always answer in {language}.
+        4. Always answer in the same language as the question.
         5. When mentioning scores, dealers, or other specific data, be precise.
 
         Answer:
-        """.format(language=self.language)
+        """
     
     def get_report_config(self) -> Dict[str, Any]:
         """Get report generation configuration."""

@@ -292,7 +292,7 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
 
                     response_builder = result.get('response_builder')
                     if response_builder:
-                        async for chunk in response_builder.generate_visual_summary_stream(df_result, query_spec):
+                        async for chunk in response_builder.generate_visual_summary_stream(df_result, query_spec, request.question):
                             if chunk:
                                 chunk_data = {
                                     'event': 'visual_chunk',

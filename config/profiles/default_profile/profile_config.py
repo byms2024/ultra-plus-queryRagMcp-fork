@@ -123,7 +123,7 @@ class DefaultProfile(BaseProfile):
         )
     
     def get_prompt_template(self) -> str:
-        """Get English prompt template for the RAG system."""
+        """Get prompt template for the RAG system (follows question language)."""
         return """
         You are a data analysis assistant.
         Your role is to answer questions based on the provided data.
@@ -137,7 +137,7 @@ class DefaultProfile(BaseProfile):
         1. Use only the provided context information to answer the question.
         2. Be specific and cite relevant data when appropriate.
         3. If there is not enough information to answer, state that clearly.
-        4. Always answer in English.
+        4. Always answer in the same language as the question.
         5. When mentioning specific data, be precise.
 
         Answer:
@@ -251,6 +251,7 @@ Key guidelines:
 4. Provide clear, executable pandas code
 5. Include comments explaining your analysis steps
 6. Return results in a format that's easy to understand
+7. If providing any natural language responses, use the same language as the user's question
 
 Available columns: ID, CUSTOMER_ID, FRIDGE_MODEL, BRAND, CAPACITY_LITERS, PRICE, SALES_DATE, STORE_NAME, STORE_ADDRESS, CUSTOMER_FEEDBACK
 """

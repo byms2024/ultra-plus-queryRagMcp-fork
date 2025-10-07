@@ -217,7 +217,7 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
             
             # Ensure the code assigns to 'result'
             if 'result =' not in code:
-                logger.warning("Generated code doesn't assign to 'result' variable")
+                raise ValueError("Generated code must assign the final output to a variable named 'result'.")
             
             return code
             
@@ -228,8 +228,8 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
     def _execute_pandas_code(self, code: str, df: pd.DataFrame) -> Union[pd.DataFrame, str]:
         """Execute pandas code safely in a restricted environment."""
         try:
-            # Create a safe execution environment
-            local_vars = {
+            # Create a safe execution environment; use same dict for globals/locals so functions can access 'pd', etc.
+            env = {
                 'df': df,
                 'pd': pd,
                 'datetime': datetime,
@@ -252,11 +252,11 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
             }
             
             # Execute the code
-            exec(code, {}, local_vars)
+            exec(code, env, env)
             
             # Try to return the 'result' variable
-            if 'result' in local_vars:
-                result = local_vars['result']
+            if 'result' in env:
+                result = env['result']
                 
                 # Validate the result
                 if isinstance(result, (pd.DataFrame, pd.Series)):
@@ -270,7 +270,7 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
                 else:
                     return str(result)
             else:
-                return "Code executed but no 'result' variable found."
+                return "Execution error: No 'result' variable found."
                 
         except Exception as e:
             logger.error(f"Code execution failed: {e}")

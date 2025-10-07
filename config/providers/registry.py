@@ -42,11 +42,18 @@ class LLMFactory:
             max_tokens = config.extras.get("max_tokens", 2048)
             if not api_key:
                 raise ValueError("Google provider requires 'api_key' in ProviderConfig.credentials")
+            # Optional timeout/retry controls
+            timeout_seconds = config.extras.get("timeout", None)
+            max_retries = config.extras.get("max_retries", 0)
             return ChatGoogleGenerativeAI(
                 model=config.generation_model,
                 google_api_key=api_key,
                 temperature=temperature,
                 max_output_tokens=max_tokens,
+                # Fail fast on network/DNS errors
+                max_retries=max_retries,
+                # If provided, enforce per-request timeout
+                **({"timeout": timeout_seconds} if timeout_seconds is not None else {}),
             )
         # Placeholder stubs for future providers
         elif provider == "openai":

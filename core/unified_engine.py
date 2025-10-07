@@ -365,8 +365,19 @@ class UnifiedQueryEngine:
             
             # If still no result, return error
             if not result:
+                # Localize fallback based on question language (basic EN/PT detection)
+                ql = question.lower()
+                # Detect Chinese quickly via CJK ranges
+                is_zh = any('\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf' for ch in question)
+                is_pt = any(tok in ql for tok in [" por que", " como ", " o que ", " quais ", " qual ", " resumo", " quantos"]) or any(ch in ql for ch in "ãõáéíóúçâêô")
+                if is_zh:
+                    fallback_text = "抱歉，我未能找到该问题的答案。请尝试重新表述或提供更多细节。"
+                elif is_pt:
+                    fallback_text = "Não consegui encontrar uma resposta para sua pergunta. Tente reformular ou fornecer mais detalhes."
+                else:
+                    fallback_text = "I'm sorry, I couldn't find an answer to your question. Please try rephrasing it or providing more specific details."
                 result = {
-                    "answer": "I'm sorry, I couldn't find an answer to your question. Please try rephrasing it or providing more specific details.",
+                    "answer": fallback_text,
                     "sources": [],
                     "confidence": "low",
                     "error": "No result from either method"

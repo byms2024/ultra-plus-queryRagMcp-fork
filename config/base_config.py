@@ -503,6 +503,9 @@ def get_provider_config(temperature: Optional[float] = None, max_tokens: Optiona
         credentials={"api_key": api_key},
         extras={
             "temperature": temperature or 0.2,  # Profile-specific override (default is 0.1)
-            "max_tokens": max_tokens or 2048   # Profile-specific override (default is 4000)
+            "max_tokens": max_tokens or 2048,  # Profile-specific override (default is 4000)
+            # Timeout and retry behavior for LLM calls
+            "timeout": getattr(config, "llm_request_timeout_seconds", 60),
+            "max_retries": 0,
         }
     )

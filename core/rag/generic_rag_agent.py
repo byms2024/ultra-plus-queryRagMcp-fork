@@ -181,6 +181,7 @@ Context:
 Question: {question}
 
 Please provide a comprehensive answer based on the context above. If the context doesn't contain enough information to answer the question, please say so.
+Always answer in the same language as the question.
 
 Answer:"""
         
@@ -321,7 +322,7 @@ Answer:"""
             # Create context from retrieved documents
             context = "\n\n".join([doc.page_content for doc in docs[:5]])  # Use top 5 docs
             
-            # Create streaming prompt
+            # Create streaming prompt (answers should follow question language)
             prompt_template = self._get_prompt_template()
             prompt_text = prompt_template.format(context=context, question=question)
             

@@ -7,6 +7,7 @@ Combines traditional JSON-based synthesis with LangChain approaches.
 from typing import Dict, Any, Optional, Union, List
 import pandas as pd
 import time
+import unicodedata
 
 from config.base_config import Config, load_profile
 from config.logging_config import get_rag_logger
@@ -116,8 +117,7 @@ class QuerySynthesisEngine:
             
             # Simple heuristic-based selection
             # For complex queries with aggregations, prefer LangChain
-            complex_indicators = ["group by", "aggregate", "sum", "average", "mean", "count", "max", "min"]
-            if any(indicator in question.lower() for indicator in complex_indicators):
+            if self._is_complex_query(question):
                 if "langchain_direct" in available_methods:
                     return "langchain_direct"
                 elif "langchain_agent" in available_methods:
@@ -134,6 +134,62 @@ class QuerySynthesisEngine:
             logger.warning(f"Failed to select best method: {e}")
             return "traditional" if self.traditional_synthesizer else "langchain_direct"
     
+    def _normalize_text(self, text: str) -> str:
+        """Lowercase, strip accents/diacritics, and collapse whitespace for robust matching."""
+        lowered = text.lower()
+        # Remove diacritics (e.g., média -> media). Chinese characters are preserved.
+        normalized = unicodedata.normalize("NFKD", lowered)
+        without_diacritics = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        collapsed = " ".join(without_diacritics.split())
+        return collapsed
+
+    def _is_complex_query(self, question: str) -> bool:
+        """Detect if the question implies aggregation or grouping in EN/PT/ZH in a generic way.
+
+        Heuristics:
+        - Look for aggregator tokens (sum/average/count/max/min) across EN/PT/ZH.
+        - Look for grouping expressions (group by/agrupar por/分组/按...).
+        """
+        q_norm = self._normalize_text(question)
+
+        # Aggregation indicators (normalized, so PT terms should be accent-less)
+        aggregation_tokens = [
+            # English
+            "aggregate", "aggregation", "sum", "total", "average", "mean","median", "count", "max", "min",
+            # Portuguese
+            "agregacao", "agregado", "soma", "somar", "total", "media","mediana", "contagem", "contar", "quantidade", "maximo", "minimo", "maior", "menor",
+            # Chinese
+            "总和", "求和", "平均", "均值", "计数", "数量", "最大", "最小", "最高", "最低", "合计", "汇总", "中位数", "中位數", "中值", "中间值", "中間值",
+        ]
+
+        # Group-by style indicators
+        group_by_tokens = [
+            # English
+            "group by",
+            # Portuguese
+            "agrupar por", "agrupar",
+            # Chinese
+            "分组", "按", "按月", "按年", "按日",
+        ]
+
+        # Ranking / top-N and ordering indicators (drive aggregation + sorting/limit)
+        ranking_tokens = [
+            # English
+            "top ", "top", "rank", "ranking", "order by", "most", "least", "number of",
+            # Portuguese (unaccented due to normalization)
+            "top ", "top", "ranking", "ordenar", "ordenar por", "mais", "menos", "numero de",
+            # Chinese
+            "前五", "前5", "排名", "排序", "最多", "最少", "数目",
+        ]
+
+        if any(tok in q_norm for tok in aggregation_tokens):
+            return True
+        if any(tok in q_norm for tok in group_by_tokens):
+            return True
+        if any(tok in q_norm for tok in ranking_tokens):
+            return True
+        return False
+
     def _update_performance_stats(self, method: str, success: bool, execution_time: float):
         """Update performance statistics for method selection."""
         if method in self.performance_stats:
@@ -247,7 +303,7 @@ class QuerySynthesisEngine:
         first_rows_hint = self.data_manager.get_sample_data(3)
         
         if method == "traditional" and self.traditional_synthesizer:
-            return self.traditional_synthesizer.synthesize(question, first_rows_hint)
+            return self.traditional_synthesizer.synthesize(question, self.df, first_rows_hint)
         
         elif method == "langchain_direct" and self.langchain_synthesizer:
             return self.langchain_synthesizer.synthesize(question, self.df, first_rows_hint)
@@ -311,9 +367,17 @@ class QuerySynthesisEngine:
                 return response
             
             # Execute the query based on its type
-            if query_spec.get("query_type") in ["langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent"]:
+            if query_spec.get("query_type") in [
+                "langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent",
+                "traditional_direct", "traditional_series", "traditional_scalar"
+            ]:
                 # LangChain methods return results directly
                 logger.info(f"[engine] ⚡ Building response from LangChain result...")
+                # Attach original question to query_spec for downstream language awareness
+                if isinstance(query_spec, dict):
+                    query_spec.setdefault("question", question)
+                # Expose last question to response builder (used for language hints)
+                setattr(self.response_builder, 'last_question', question)
                 response = self.response_builder.build_response(query_spec.get("result"), query_spec)
                 total_time = time.time() - query_start
                 logger.info(f"[engine] ✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s)")
@@ -355,6 +419,10 @@ class QuerySynthesisEngine:
                 exec_time = time.time() - exec_start
                 
                 logger.info(f"[engine] ⚡ Building response...")
+                # Attach original question to query_spec for downstream language awareness
+                if isinstance(query_spec, dict):
+                    query_spec.setdefault("question", question)
+                setattr(self.response_builder, 'last_question', question)
                 response = self.response_builder.build_response(df_result, query_spec)
                 total_time = time.time() - query_start
                 logger.info(f"[engine] ✅ Query completed in {total_time:.2f}s (synthesis: {synthesis_time:.2f}s, execution: {exec_time:.2f}s)")
@@ -438,7 +506,10 @@ class QuerySynthesisEngine:
                 }
             
             # Execute based on query type
-            if query_spec.get("query_type") in ["langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent"]:
+            if query_spec.get("query_type") in [
+                "langchain_direct", "langchain_series", "langchain_scalar", "langchain_agent",
+                "traditional_direct", "traditional_series", "traditional_scalar"
+            ]:
                 # LangChain methods - result is already in query_spec
                 df_result = query_spec.get("result")
             else:

@@ -1,13 +1,15 @@
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
+
+import pandas as pd
 
 from config.logging_config import get_rag_logger
 from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
 from ..utils.time_utils import parse_relative_date_range
+from ..data import build_schema_description, validate_dataframe_for_langchain
 from config.providers.registry import LLMFactory
 
 logger = get_rag_logger()
@@ -25,105 +27,189 @@ class QuerySynthesizer:
         
         self.allowed_columns = profile.required_columns
 
-    def extract_json_from_text(self, text: str) -> Optional[str]:
+    # ---- Pandas-code generation helpers (kept local for simplicity) ----
+    def _build_system_prompt(self) -> str:
         try:
-            text = text.strip()
-            if text.startswith("```") and text.endswith("```"):
-                first_newline = text.find('\n')
-                last_backticks = text.rfind("```")
-                if first_newline != -1 and last_backticks != -1:
-                    text = text[first_newline + 1:last_backticks].strip()
-            start = text.find('{')
-            end = text.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                return text[start:end + 1]
-            return None
+            base_prompt = self.profile.get_llm_system_prompt()
+            instructions = (
+                "You are a Python data assistant specialized in generating pandas code.\n"
+                "Generate ONLY pandas code and assign the final result to a variable named 'result'.\n"
+                "Use the provided DataFrame 'df' as the data source."
+            )
+            return f"{base_prompt}\n\n{instructions}"
         except Exception:
-            return None
-
-    def synthesize(self, question: str, df_first_rows_hint: str = "") -> Optional[Dict[str, Any]]:
-        try:
-            window = parse_relative_date_range(question)
-            window_hint = "none"
-            if window is not None:
-                ws, we = window
-                window_hint = f"{ws.date()} to {we.date()}"
-
-            system_rules = self.profile.get_llm_system_prompt()
-            schema_hint = self.profile.get_schema_hints(df_first_rows_hint)
-
-            prompt = (
-                f"Question: {question}\n" +
-                f"Detected date window hint: {window_hint}\n\n" +
-                "Return only JSON matching the schema."
+            return (
+                "You are a Python data assistant. Generate pandas code to answer the user's question. "
+                "Assign the final output to 'result'."
             )
 
-            # Log before LLM call
-            logger.info(f"[{self.strategy_name}] 🤖 Calling LLM (traditional synthesis)...")
+    def _build_schema_hints(self, schema_description: str) -> str:
+        try:
+            base_hints = self.profile.get_schema_hints(schema_description)
+            extra = (
+                "Use only the columns listed above. Respect data types. "
+                "Compare date columns using proper datetime operations."
+            )
+            return f"{base_hints}\n\nSCHEMA INFORMATION:\n{schema_description}\n\n{extra}"
+        except Exception:
+            return f"Available columns: {', '.join(self.allowed_columns)}"
+
+    def _handle_date_context(self, query: str) -> str:
+        try:
+            window = parse_relative_date_range(query)
+            if window is not None:
+                start_date, end_date = window
+                return (
+                    "DATE CONTEXT:\n"
+                    f"- Start Date: {start_date.date()}\n"
+                    f"- End Date: {end_date.date()}\n"
+                )
+            return ""
+        except Exception:
+            return ""
+
+    def _build_complete_prompt(self, query: str, schema_description: str) -> str:
+        parts = [
+            self._build_system_prompt(),
+            self._build_schema_hints(schema_description),
+            self._handle_date_context(query),
+            f"USER QUESTION: {query}",
+            "Generate pandas code that assigns the result to a variable named 'result'.",
+        ]
+        return "\n\n".join(filter(None, parts))
+
+    def _extract_code_from_response(self, response) -> str:
+        # Accept Provider or raw string
+        code = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+        # Remove fenced blocks
+        if code.startswith("```") and code.endswith("```"):
+            lines = code.split('\n')
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "````":
+                lines = lines[:-1]
+            elif lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            code = "\n".join(lines)
+        # Remove language tags
+        if code.startswith("```python"):
+            code = code[9:]
+        elif code.startswith("```py"):
+            code = code[5:]
+        code = code.strip()
+        if "result =" not in code:
+            raise ValueError("Generated code must assign the final output to a variable named 'result'.")
+        return code
+
+    def _execute_pandas_code(self, code: str, df: pd.DataFrame) -> Union[pd.DataFrame, pd.Series, Any]:
+        # Restricted execution environment; use same dict for globals/locals so functions see symbols like 'pd'
+        env = {
+            'df': df,
+            'pd': pd,
+            'datetime': datetime,
+            '__builtins__': {
+                'len': len,
+                'str': str,
+                'int': int,
+                'float': float,
+                'bool': bool,
+                'list': list,
+                'dict': dict,
+                'tuple': tuple,
+                'set': set,
+                'min': min,
+                'max': max,
+                'sum': sum,
+                'abs': abs,
+                'round': round,
+            },
+        }
+        exec(code, env, env)
+        if 'result' not in env:
+            raise RuntimeError("Execution error: No 'result' variable found.")
+        return env['result']
+
+    def _format_result_for_executor(self, result: Union[pd.DataFrame, pd.Series, Any]) -> Dict[str, Any]:
+        if isinstance(result, pd.DataFrame):
+            return {
+                "filters": [],
+                "aggregations": [],
+                "sort_by": [],
+                "limit": len(result),
+                "query_type": "traditional_direct",
+                "result": result,
+                "langchain_generated": False,
+            }
+        if isinstance(result, pd.Series):
+            return {
+                "filters": [],
+                "aggregations": [],
+                "sort_by": [],
+                "limit": len(result),
+                "query_type": "traditional_series",
+                "result": result.to_frame(),
+                "langchain_generated": False,
+            }
+        # Scalar or other iterable -> try DataFrame, else stringify
+        try:
+            df = pd.DataFrame(result) if not pd.api.types.is_scalar(result) else pd.DataFrame([{"value": result}])
+        except Exception:
+            df = pd.DataFrame([{"value": str(result)}])
+        return {
+            "filters": [],
+            "aggregations": [],
+            "sort_by": [],
+            "limit": len(df),
+            "query_type": "traditional_scalar",
+            "result": df,
+            "langchain_generated": False,
+        }
+
+    # ---- Public API ----
+    def synthesize(self, question: str, df: pd.DataFrame, df_first_rows_hint: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Generate pandas code for the question, execute it, and return a result dict
+        compatible with the executor/response builder (direct result, like LangChain).
+        """
+        try:
+            # Validate DF for processing (re-using existing helper)
+            validation = validate_dataframe_for_langchain(df, self.profile)
+            if not validation.get('is_valid', True):
+                logger.warning(f"[{self.strategy_name}] DataFrame validation warnings: {validation.get('errors')}")
+
+            # Build prompt
+            schema_description = build_schema_description(df, self.profile)
+            full_prompt = self._build_complete_prompt(question, schema_description)
+
+            # Invoke LLM with timeout using a thread wrapper (to keep parity with prior behavior)
+            logger.info(f"[{self.strategy_name}] 🤖 Calling LLM (direct pandas generation)...")
             llm_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
             llm_start = time.time()
             try:
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(self.llm_provider.invoke, system_rules + "\n" + schema_hint + "\n" + prompt)
+                    future = executor.submit(self.llm_provider.invoke, full_prompt)
                     response = future.result(timeout=llm_timeout)
             except FuturesTimeoutError:
                 logger.warning(f"[{self.strategy_name}] ⏱️ LLM call timed out after {llm_timeout:.2f}s")
-                return None
+                return {
+                    "error": f"LLM call timed out after {llm_timeout:.2f}s",
+                    "query_type": "error",
+                }
             llm_duration = time.time() - llm_start
             logger.info(f"[{self.strategy_name}] ✅ LLM response received in {llm_duration:.2f}s")
-            
-            # Handle LangChain response format
-            if hasattr(response, 'content'):
-                raw_text = response.content
-            else:
-                raw_text = str(response)
-            json_str_extracted = self.extract_json_from_text(raw_text)
-            json_str = json_str_extracted if isinstance(json_str_extracted, str) and json_str_extracted.strip() else raw_text
-            if not json_str.strip():
-                raise ValueError("No JSON content returned by model")
-            spec = json.loads(json_str)
 
-            if not isinstance(spec, dict):
-                raise ValueError("Spec is not a JSON object")
+            # Extract code and execute safely
+            code = self._extract_code_from_response(response)
+            logger.debug(f"[{self.strategy_name}] Generated pandas code: {code}")
+            result_obj = self._execute_pandas_code(code, df)
 
-            limit = int(spec.get('limit', 100))
-            spec['limit'] = max(1, min(limit, 500))
-
-            def _filter_cols(cols: Any) -> List[str]:
-                return [c for c in (cols or []) if c in self.allowed_columns]
-
-            if 'select' in spec:
-                spec['select'] = _filter_cols(spec.get('select'))
-            if 'group_by' in spec:
-                spec['group_by'] = _filter_cols(spec.get('group_by'))
-
-            if window is not None:
-                has_date_filter = False
-                date_columns = self.profile.date_columns
-                for f in spec.get('filters', []) or []:
-                    if isinstance(f, dict) and f.get('column') in date_columns:
-                        has_date_filter = True
-                        break
-                if not has_date_filter and date_columns:
-                    start, end = window
-                    spec.setdefault('filters', []).append({
-                        'column': date_columns[0], 'op': 'date_range', 'value': [str(start.date()), str(end.date())]
-                    })
-
-            print(spec)
-            return spec
+            return self._format_result_for_executor(result_obj)
 
         except Exception as e:
-            logger.warning(f"Failed to synthesize pandas spec: {e}")
-            window = parse_relative_date_range(question)
-            if window is not None and self.profile.date_columns:
-                start, end = window
-                return {
-                    'filters': [
-                        {'column': self.profile.date_columns[0], 'op': 'date_range', 'value': [str(start.date()), str(end.date())]}
-                    ],
-                    'limit': 100
-                }
-            return None
+            logger.error(f"[{self.strategy_name}] ❌ Pandas generation/execution failed: {e}")
+            return {
+                "error": f"Traditional direct synthesis failed: {e}",
+                "query_type": "error",
+            }
 
 

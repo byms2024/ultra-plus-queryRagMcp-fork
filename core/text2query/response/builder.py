@@ -33,39 +33,71 @@ class ResponseBuilder:
         if df_result is None or df_result.empty:
             return self._build_empty_response(query_spec)
         
-        # Format for display and return
-        table = self._format_dataframe_for_display(df_result)
+        # Format for display and return (no table/preview formatting needed)
         sources = self.profile.create_sources_from_df(df_result)
         
         narrative = self.generate_visual_summary(df_result, query_spec)
 
         response: Dict[str, Any] = {
-            'answer': narrative if narrative else table,
+            'answer': narrative,
             'sources': sources,
             'confidence': 'high',
             'query_spec': query_spec
         }
 
-        if narrative:
-            response['visual_answer'] = {'markdown': narrative}
-            if table:
-                response.setdefault('preview', {})['table_csv'] = table
-
         return response
     
+    def _detect_language_from_question(self, question: Optional[str]) -> str:
+        """Very lightweight language detection for EN/PT; defaults to EN."""
+        if not question:
+            return "en"
+        q = (question or "").lower()
+        # Chinese characters detection (CJK Unified Ideographs and Extension A)
+        try:
+            if any('\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf' for ch in question):
+                return "zh"
+        except Exception:
+            pass
+        # Portuguese indicators
+        pt_tokens = [" que ", " como ", " por que", " qual ", " quais ", " são ", " nao ", "não ", " quantos", " média", " soma "]
+        if any(tok in q for tok in pt_tokens) or any(ch in q for ch in "ãõáéíóúçâêô" ):
+            return "pt"
+        return "en"
+
+    def _localize(self, text_id: str, lang: str) -> str:
+        """Return a localized string for small set of defaults."""
+        catalog = {
+            'no_rows_title_en': 'No matching rows for your request.',
+            'no_rows_title_pt': 'Nenhuma linha correspondente para sua solicitação.',
+            'no_rows_title_zh': '未找到与您的请求匹配的行。',
+            'no_rows_summary_en': 'No matching data was returned for the requested filters.',
+            'no_rows_summary_pt': 'Nenhum dado correspondente foi retornado para os filtros solicitados.',
+            'no_rows_summary_zh': '根据所选筛选条件，没有返回匹配的数据。',
+        }
+        key = f"{text_id}_{'pt' if lang=='pt' else 'en'}"
+        if lang == 'zh':
+            key = f"{text_id}_zh"
+        return catalog.get(key, catalog.get(f"{text_id}_en", ""))
+
     def _build_empty_response(self, query_spec: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Build response when no results are found."""
+        question = None
+        if isinstance(query_spec, dict):
+            question = query_spec.get('question') or getattr(self, 'last_question', None)
+        lang = self._detect_language_from_question(question)
+
         empty_response = {
-            'answer': 'No matching rows for your request.',
+            'answer': self._localize('no_rows_title', lang),
             'sources': [],
             'confidence': 'low',
             'query_spec': query_spec
         }
 
         if self.visual_llm:
+            base_summary = self._localize('no_rows_summary', lang)
             visual_summary = self._safe_visual_call(
                 base_payload={
-                    'summary': 'No matching data was returned for the requested filters.',
+                    'summary': base_summary,
                     'row_count': 0,
                     'column_names': [],
                     'query_spec': query_spec or {}
@@ -73,7 +105,6 @@ class ResponseBuilder:
             )
             if visual_summary:
                 empty_response['answer'] = visual_summary
-                empty_response['visual_answer'] = {'markdown': visual_summary}
 
         return empty_response
 
@@ -128,11 +159,6 @@ class ResponseBuilder:
         stats_snapshot = self.get_basic_stats(df)
 
         prompt_payload = {
-            'instruction': (
-                "Produce a plain Markdown report (<= 200 words) that presents the final result of the query. "
-                "Use native Markdown elements like lists, tables and emoji icons when helpful, and use only H4 titles (####). "
-                "Do not include JSON, code fences, or mermaid diagrams; respond with Markdown only."
-            ),
             'query_spec': query_spec or {},
             'schema': columns_meta,
             'row_count': total_rows,
@@ -150,12 +176,7 @@ class ResponseBuilder:
         start_time = time.perf_counter()
         try:
             timeout = getattr(self.visual_llm, '_visual_timeout', 60)
-            instruction = (
-                "Return a concise plain-Markdown summary of the provided context. "
-                "Include the final result of the query and optionally Markdown tables, numbered or bulleted lists, and emoji icons to highlight insights."
-                "Be precise and concise and use H4 titles (####) if you add headings."
-                "Prefer numerated lists over tables unless the data is very large. Do not return JSON, code fences, or mermaid diagrams; respond with Markdown only."
-            )
+            instruction = self._get_visual_markdown_instruction()
 
             sanitized_context = self._sanitize_for_json(base_payload)
             payload_dict = {'instruction': instruction, 'context': sanitized_context}
@@ -185,6 +206,19 @@ class ResponseBuilder:
 
         return None
 
+    def _get_visual_markdown_instruction(self, language_hint: str) -> str:
+        """Single source of truth for visual markdown instruction to avoid duplication."""
+        return (
+            "Return a concise plain-Markdown including the final result of the query, without mentioning the query or the data."
+            "Use Markdown tables, numbered or bulleted lists, and emojis to highlight."
+            "Be precise and concise and use H4 titles (####)."
+            "Add single spacing to new lines and double spacing between the title and the content."
+            "Prefer numerated lists over tables unless the data is very large. Do not return JSON or code fences."
+            "Do not include any other text or explanation."
+            f"Answer in this language: {language_hint}."
+            
+        )
+
     def generate_visual_summary(
         self,
         df: Optional[pd.DataFrame],
@@ -204,51 +238,50 @@ class ResponseBuilder:
 
         enriched = self._safe_visual_call(base_payload)
         if not enriched:
-            return None
+            return 
 
         return enriched
     
     async def generate_visual_summary_stream(
         self,
         df: Optional[pd.DataFrame],
-        query_spec: Optional[Dict[str, Any]]
+        query_spec: Optional[Dict[str, Any]],
+        question: Optional[str] = None
     ) -> AsyncIterator[str]:
         """
         Stream a user-friendly markdown summary with visuals based on DataFrame.
         Yields chunks of text as they are generated by the LLM.
         """
-        if df is None or df.empty:
-            yield ""
+        lang = self._detect_language_from_question(question)
+
+        if df is None or df.empty:            
+            yield self._localize('no_rows_title', lang)
             return
 
         if not self.visual_llm:
-            yield ""
+            yield "Error: Visual LLM not available."
             return
 
         start_time = time.perf_counter()
-        
+
         try:
             prompt = self._construct_visual_prompt(df, query_spec)
-            
-            instruction = (
-                "Return a concise plain-Markdown summary of the provided context. "
-                "Include the final result of the query and optionally Markdown tables, numbered or bulleted lists, and emoji icons to highlight insights."
-                "Be precise and concise and use H4 titles (####) if you add headings."
-                "Prefer numerated lists over tables unless the data is very large. Do not return JSON, code fences, or mermaid diagrams; respond with Markdown only."
-            )
+
+            # Use localized instruction that includes language awareness
+            instruction = self._get_visual_markdown_instruction(lang)
 
             base_payload = {
                 'prompt': prompt,
                 'query_spec': query_spec or {}
             }
-            
+
             sanitized_context = self._sanitize_for_json(base_payload)
             payload_dict = {'instruction': instruction, 'context': sanitized_context}
             sanitized_payload = self._sanitize_for_json(payload_dict)
             payload = json.dumps(sanitized_payload)
 
             timeout = getattr(self.visual_llm, '_visual_timeout', 60)
-            
+
             # Stream from the LLM
             chunk_count = 0
             async for chunk in self.visual_llm.astream(payload, config={'timeout': timeout}):
@@ -256,18 +289,18 @@ class ResponseBuilder:
                     content = str(chunk.content)
                 else:
                     content = str(chunk)
-                
+
                 if content:
                     chunk_count += 1
                     yield content
-            
+
             duration = time.perf_counter() - start_time
             logger.info(f"[visual] ✅ Visual summary streamed in {duration:.3f} seconds ({chunk_count} chunks)")
-            
+
         except Exception as exc:
             duration = time.perf_counter() - start_time
             logger.warning(f"[visual] ❌ Visual enrichment streaming failed after {duration:.3f} seconds: {exc}")
-            yield ""
+            yield "Error: Visual enrichment streaming failed."
 
     def _sanitize_for_json(self, value: Any) -> Any:
         """Recursively convert values into JSON-serializable primitives."""

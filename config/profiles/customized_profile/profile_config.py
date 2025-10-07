@@ -156,8 +156,13 @@ class CustomizedProfile(BaseProfile):
         1. Use apenas as informações de contexto fornecidas para responder à pergunta.
         2. Seja específico e cite dados relevantes quando apropriado.
         3. Se não houver informações suficientes para responder, declare isso claramente.
-        4. Sempre responda em português brasileiro.
+        4. Sempre responda na mesma língua da pergunta.
         5. Ao mencionar pontuações, dealers ou outros dados específicos, seja preciso.
+        6. Aplique a definição oficial de NPS ao analisar os resultados:
+           - Promotores: pontuação 9–10
+           - Neutros (Passivos): pontuação 7–8
+           - Detratores: pontuação 0–6
+           - Cálculo do NPS: % de Promotores − % de Detratores (com base em registros válidos)
 
         Resposta:
         """
@@ -266,6 +271,12 @@ Schema hints for NPS data:
 - VIN: Vehicle identification number (sensitive)
 - CREATE_DATE: Date when order was created
 - OTHERS_REASON: Additional reason (text field)
+
+NPS rules to apply in analyses:
+- Promoters (Promotores): SCORE 9–10
+- Passives (Neutros): SCORE 7–8
+- Detractors (Detratores): SCORE 0–6
+- NPS = (% Promoters − % Detractors), using non-null SCORE records as the denominator
 """
     
     def get_llm_system_prompt(self) -> str:
@@ -280,7 +291,16 @@ Key guidelines:
 3. Handle dates properly using pandas datetime functions
 4. Provide clear, executable pandas code
 5. Include comments explaining your analysis steps
-6. Return results in a format that's easy to understand
+6. Always answer in the same language as the question.
+7. If providing any natural language responses, use the same language as the user's question
+8. Return results in a format that's easy to understand
+
+NPS rules you MUST apply when categorizing or computing metrics:
+- Promoters (Promotores): SCORE 9–10
+- Passives (Neutros): SCORE 7–8
+- Detractors (Detratores): SCORE 0–6
+- NPS = (% Promoters − % Detractors). Percentages must use the count of valid (non-null) SCORE rows as the denominator.
+- When reporting rates or NPS, prefer percentages with one decimal place.
 
 Available columns: RO_NO, DEALER_CODE, SUB_DEALER_CODE, SCORE, SERVICE_ATTITUDE, ENVIRONMENT, EFFICIENCY, EFFECTIVENESS, PARTS_AVAILABILITY, OTHERS, TROUBLE_DESC, CHECK_RESULT, REPAIR_TYPE_NAME, VIN, CREATE_DATE, OTHERS_REASON
 """
