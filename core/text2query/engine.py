@@ -234,6 +234,16 @@ class QuerySynthesisEngine:
             start_time = time.time()
             logger.info(f"[engine] 🔄 Starting synthesis with {method}...")
             result = self._synthesize_with_method(method, question)
+
+            # Treat error-like results as failures to trigger fallback
+            if (
+                not result or
+                (isinstance(result, dict) and (
+                    result.get("query_type") == "error" or
+                    ("error" in result and result.get("error"))
+                ))
+            ):
+                raise RuntimeError(result.get("error", "Synthesis returned no result"))
             execution_time = time.time() - start_time
             
             # Update performance stats
@@ -279,17 +289,21 @@ class QuerySynthesisEngine:
             lost_time = sum(a["duration"] for a in attempt_history if not a["success"])
             logger.warning(f"⏱️ Time lost on {method}: {execution_time:.2f}s (cumulative lost: {lost_time:.2f}s)")
             
-            # Try fallback methods
-            if method != "traditional" and self.traditional_synthesizer:
-                logger.info(
-                    f"[engine] 🔄 Trying traditional method as fallback (cumulative lost time: {lost_time:.2f}s)"
-                )
-                return self.synthesize_query(question, "traditional", attempt_history)
-            elif method != "langchain_direct" and self.langchain_synthesizer:
-                logger.info(
-                    f"[engine] 🔄 Trying LangChain direct method as fallback (cumulative lost time: {lost_time:.2f}s)"
-                )
-                return self.synthesize_query(question, "langchain_direct", attempt_history)
+            # Try fallback methods, but ensure each method is attempted at most once
+            attempted = {a["method"] for a in attempt_history}
+            fallback_order = ["langchain_direct", "langchain_agent", "traditional"]
+            for m in fallback_order:
+                if m != method and m not in attempted:
+                    # Check availability
+                    if (
+                        (m == "langchain_direct" and self.langchain_synthesizer) or
+                        (m == "langchain_agent" and self.langchain_agent) or
+                        (m == "traditional" and self.traditional_synthesizer)
+                    ):
+                        logger.info(
+                            f"[engine] 🔄 Trying {m} as fallback (cumulative lost time: {lost_time:.2f}s)"
+                        )
+                        return self.synthesize_query(question, m, attempt_history)
             
             return {
                 "error": f"All synthesis methods failed. Last error: {e}",

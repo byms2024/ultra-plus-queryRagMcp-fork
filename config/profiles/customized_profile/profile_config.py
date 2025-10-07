@@ -160,7 +160,7 @@ class CustomizedProfile(BaseProfile):
         5. Ao mencionar pontuações, dealers ou outros dados específicos, seja preciso.
         6. Aplique a definição oficial de NPS ao analisar os resultados:
            - Promotores: pontuação 9–10
-           - Neutros (Passivos): pontuação 7–8
+           - Neutros: pontuação 7–8
            - Detratores: pontuação 0–6
            - Cálculo do NPS: % de Promotores − % de Detratores (com base em registros válidos)
 
@@ -300,7 +300,8 @@ NPS rules you MUST apply when categorizing or computing metrics:
 - Passives (Neutros): SCORE 7–8
 - Detractors (Detratores): SCORE 0–6
 - NPS = (% Promoters − % Detractors). Percentages must use the count of valid (non-null) SCORE rows as the denominator.
-- When reporting rates or NPS, prefer percentages with one decimal place.
+- When reporting rates prefer percentages with one decimal place.
+- Final NPS value is NOT a percentage.
 
 Available columns: RO_NO, DEALER_CODE, SUB_DEALER_CODE, SCORE, SERVICE_ATTITUDE, ENVIRONMENT, EFFICIENCY, EFFECTIVENESS, PARTS_AVAILABILITY, OTHERS, TROUBLE_DESC, CHECK_RESULT, REPAIR_TYPE_NAME, VIN, CREATE_DATE, OTHERS_REASON
 """

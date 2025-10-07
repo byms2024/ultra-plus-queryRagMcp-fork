@@ -214,6 +214,16 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
                 code = code[5:]
             
             code = code.strip()
+            # Harden: strip imports and dangerous builtins
+            filtered_lines = []
+            for line in code.split('\n'):
+                stripped = line.strip()
+                if stripped.startswith('import ') or stripped.startswith('from '):
+                    continue
+                if '__import__' in stripped or 'eval(' in stripped or 'exec(' in stripped:
+                    continue
+                filtered_lines.append(line)
+            code = '\n'.join(filtered_lines).strip()
             
             # Ensure the code assigns to 'result'
             if 'result =' not in code:

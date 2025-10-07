@@ -97,6 +97,16 @@ class QuerySynthesizer:
         elif code.startswith("```py"):
             code = code[5:]
         code = code.strip()
+        # Harden: strip import lines and dunder usage
+        filtered_lines = []
+        for line in code.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('import ') or stripped.startswith('from '):
+                continue
+            if '__import__' in stripped or 'eval(' in stripped or 'exec(' in stripped:
+                continue
+            filtered_lines.append(line)
+        code = '\n'.join(filtered_lines).strip()
         if "result =" not in code:
             raise ValueError("Generated code must assign the final output to a variable named 'result'.")
         return code
