@@ -26,7 +26,10 @@ from config.logging_config import (
     get_request_id,
 )
 from core.unified_engine import UnifiedQueryEngine
+from core.text2query.response.builder import ResponseBuilder
 from reports.generic_report_builder import generate_report_from_question, ReportConfig
+from config.providers.registry import LLMFactory
+from servers.nps_http_client import get_json as nps_get_json
 
 # Get logger
 logger = get_logger(__name__)
@@ -34,7 +37,7 @@ logger = get_logger(__name__)
 # Pydantic models
 class QuestionRequest(BaseModel):
     question: str = Field(..., description="The question to ask about the data")
-    method: str = Field("auto", description="Query method: 'auto', 'text2query', 'rag', or 'both'")
+    method: str = Field("auto", description="Query method: 'auto', 'text2query', 'rag', 'both', or 'planner'")
 
 class QuestionResponse(BaseModel):
     question: str
@@ -90,6 +93,185 @@ def get_unified_engine() -> UnifiedQueryEngine:
         unified_engine = UnifiedQueryEngine()
     return unified_engine
 
+
+def _llm_choose_method(question: str) -> str:
+    """Use an LLM to select the best method: 'text2query' or 'rag'.
+
+    This is intentionally simple and returns one of the two strings. If the
+    LLM is unavailable or returns an unexpected response, default to 'auto'.
+    """
+    try:
+        profile = get_profile()
+        provider_config = profile.get_provider_config()
+        llm = LLMFactory.create(provider_config)
+
+        instruction = (
+            "You are a strict classifier for a data Q&A system with two engines: "
+            "text2query (direct pandas over structured CSV data) and rag (vector retrieval over text).\n"
+            "Choose the most suitable method for the user's question.\n"
+            "Return ONLY a compact JSON object on a single line with this exact schema: {\"method\": \"text2query\"|\"rag\"}.\n"
+            "Do not add explanations."
+        )
+
+        prompt = f"{instruction}\nQuestion: {question}"
+        # LangChain chat models typically expose .invoke(prompt)
+        response = llm.invoke(prompt)
+        text = getattr(response, "content", None) or str(response)
+
+        # Try to parse the JSON payload
+        try:
+            payload = json.loads(text.strip())
+            method = str(payload.get("method", "")).lower()
+            if method in {"text2query", "rag"}:
+                return method
+        except Exception:
+            pass
+
+        # Heuristic fallback if JSON parsing fails
+        lowered = text.lower()
+        if "rag" in lowered:
+            return "rag"
+        if "text2query" in lowered or "text2" in lowered or "pandas" in lowered:
+            return "text2query"
+        return "auto"
+    except Exception as e:
+        logger.warning(f"⚠️ Planner LLM failed, defaulting to 'auto': {e}")
+        return "auto"
+
+async def _call_nps_tool_via_mcp_or_rest(tool_name: str, params: Dict[str, Any]) -> Any:
+    """Call an NPS tool via FastMCP HTTP if available; fallback to REST.
+
+    Returns JSON-serializable data from the tool.
+    """
+    # Try FastMCP client first
+    try:
+        from fastmcp import Client  # type: ignore
+        host = os.getenv("NPS_FASTMCP_HOST", "127.0.0.1")
+        port = int(os.getenv("NPS_FASTMCP_PORT", "8011"))
+        base_url = f"http://{host}:{port}/mcp"
+
+        async def _mcp_call() -> Any:
+            async with Client(base_url) as client:  # type: ignore
+                result = await client.call_tool(tool_name, params)
+                payload: Optional[Dict[str, Any]] = None
+                for item in getattr(result, "content", []) or []:
+                    j = getattr(item, "json", None)
+                    if isinstance(j, dict):
+                        payload = j
+                        break
+                    t = getattr(item, "text", None)
+                    if isinstance(t, str):
+                        try:
+                            payload = json.loads(t)
+                            break
+                        except Exception:
+                            pass
+                if isinstance(payload, dict) and payload.get("ok"):
+                    return payload.get("data")
+                raise RuntimeError("⚠️ Invalid MCP tool response")
+
+        return await _mcp_call()
+    except Exception:
+        pass
+
+    # Fallback to REST
+    tool_to_path = {
+        "nps_scores": "/nps/api/nps-scores",
+        "nps_scores_country": "/nps/api/nps-scores-country",
+        "nps_scores_rolling_weekly": "/nps/api/nps-scores-rolling-weekly",
+        "questionnaires": "/nps/api/questionnaires",
+        "questionnaire": "/nps/api/get-questionnaire",
+        "questionnaire_category": "/nps/api/questionnaire_category",
+        "bonus_ranking": "/nps/api/bonus-ranking",
+        "bonus_ranking_group": "/nps/api/bonus-ranking-group",
+        "contested_questionnaires": "/nps/api/contested-questionnaires",
+        "aftersales_alt_nps": "/nps/api/aftersales-alt-nps",
+        "health": "/health",
+    }
+    path = tool_to_path.get(tool_name)
+    if not path:
+        raise HTTPException(status_code=400, detail=f"Unknown NPS tool: {tool_name}")
+    use_basic = tool_name == "aftersales_alt_nps"
+    return await nps_get_json(path, params=params or None, use_basic=use_basic)
+
+
+def _llm_plan_route(question: str) -> Dict[str, Any]:
+    """Plan a route using an LLM among engines and NPS tools.
+
+    Returns a dict like either of:
+      {"route_type": "engine", "method": "text2query"|"rag"}
+      {"route_type": "nps_tool", "tool": TOOL_NAME, "params": {..}}
+    Falls back to engine/auto on failure.
+    """
+    try:
+        profile = get_profile()
+        provider_config = profile.get_provider_config()
+        llm = LLMFactory.create(provider_config)
+
+        tools_list = [
+            "nps_scores",
+            "nps_scores_country",
+            "nps_scores_rolling_weekly",
+            "questionnaires",
+            "questionnaire",
+            "questionnaire_category",
+            "bonus_ranking",
+            "bonus_ranking_group",
+            "contested_questionnaires",
+            "aftersales_alt_nps",
+        ]
+        allowed_params = [
+            "start_date", "end_date", "dealer_codes", "datasource", "department",
+            "questionnaire_id", "type", "group", "region", "groups_param",
+        ]
+
+        instruction = (
+            "ROLE: You are a strict router for a data system. Choose either an engine or an NPS tool.\n"
+            "OPTIONS:\n"
+            "- Engines: text2query (structured pandas) | rag (vector retrieval).\n"
+            "- NPS tools: " + ", ".join(tools_list) + ".\n"
+            "ROUTING GUIDANCE:\n"
+            "- If the question is about NPS KPIs (scores, questionnaires, bonus ranking, promoters, detractors, dealers, groups, regions, etc.) over time, prefer an NPS tool.\n"
+            "- If it asks general analytics over the CSV, choose text2query.\n"
+            "STRICT OUTPUT CONTRACT (READ CAREFULLY):\n"
+            "- Return EXACTLY ONE JSON object on a single line.\n"
+            "- Do NOT include code fences, markdown, prose, or extra text.\n"
+            "- Use only these schemas:\n"
+            "  {\"route_type\":\"engine\",\"method\":\"text2query\"|\"rag\"}\n"
+            "  {\"route_type\":\"nps_tool\",\"tool\":TOOL_NAME,\"params\":{...}}\n"
+            "- Allowed params keys only: " + ", ".join(allowed_params) + ". Omit unknown keys.\n"
+            "- If a param is not known, omit it. If none, use an empty object {}.\n"
+            "- Use snake_case param names exactly as listed (e.g., dealer_codes).\n"
+            "- All keys and string values MUST be double-quoted valid JSON.\n"
+        )
+
+        prompt = f"{instruction}\nQuestion: {question}"
+        response = llm.invoke(prompt)
+        text = getattr(response, "content", None) or str(response)
+        payload = json.loads(str(text).strip())
+
+        if not isinstance(payload, dict):
+            raise ValueError("⚠️ Planner returned non-dict")
+        rt = str(payload.get("route_type", "")).lower()
+        if rt == "engine":
+            method = str(payload.get("method", "")).lower()
+            if method in {"text2query", "rag"}:
+                return {"route_type": "engine", "method": method}
+        elif rt == "nps_tool":
+            tool = str(payload.get("tool", "")).strip()
+            if tool in tools_list:
+                raw_params = payload.get("params") or {}
+                params: Dict[str, Any] = {}
+                if isinstance(raw_params, dict):
+                    for k, v in raw_params.items():
+                        if k in allowed_params:
+                            params[k] = v
+                return {"route_type": "nps_tool", "tool": tool, "params": params}
+        raise ValueError("⚠️ Planner returned invalid schema")
+    except Exception as e:
+        logger.warning(f"⚠️ Planner failed, defaulting to auto: {e}")
+        return {"route_type": "engine", "method": "auto"}
+
 # Create FastAPI app
 app = FastAPI(
     title="Unified QueryRAG System",
@@ -121,14 +303,14 @@ async def request_context_logging_middleware(request, call_next):
     start = perf_counter()
     try:
         logger.info(
-            f"Incoming {request.method} {request.url.path} - from {request.client.host if request.client else 'n/a'}"
+            f"➡️ Incoming {request.method} {request.url.path} - from {request.client.host if request.client else 'n/a'}"
         )
         response = await call_next(request)
         duration_ms = (perf_counter() - start) * 1000.0
         # Attach request id to response for clients
         response.headers["X-Request-ID"] = request_id
         logger.info(
-            f"Completed {request.method} {request.url.path} -> {response.status_code} in {duration_ms:.2f}ms"
+            f"✅ Completed {request.method} {request.url.path} -> {response.status_code} in {duration_ms:.2f}ms"
         )
         return response
     except Exception as e:
@@ -147,7 +329,7 @@ async def startup_event():
     # Log system information
     log_system_info()
     
-    logger.info("Starting Unified QueryRAG System...")
+    logger.info("🚀 Starting Unified QueryRAG System...")
     
     # Initialize configuration
     global config
@@ -157,12 +339,12 @@ async def startup_event():
     try:
         global unified_engine
         unified_engine = get_unified_engine()
-        logger.info("Unified engine initialized successfully")
+        logger.info("✅ Unified engine initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize unified engine: {e}")
         raise
     
-    logger.info("Unified QueryRAG System started successfully")
+    logger.info("🟢 Unified QueryRAG System started successfully")
 
 @app.get("/")
 async def root():
@@ -198,10 +380,34 @@ async def ask_question(request: QuestionRequest, engine: UnifiedQueryEngine = De
     The system will try Text2Query first, then fallback to RAG if needed.
     """
     try:
-        logger.info(f"Processing question: {request.question} (method: {request.method})")
-        
-        # Get answer from unified engine
-        result = engine.answer_question(request.question, request.method)
+        logger.info(f"🧠 Processing question: {request.question} (method: {request.method})")
+
+        # If planner is requested, decide engine or NPS tool
+        if request.method == "planner":
+            plan = await asyncio.to_thread(_llm_plan_route, request.question)
+            if plan.get("route_type") == "nps_tool":
+                tool = plan.get("tool", "")
+                params = plan.get("params", {})
+                data = await _call_nps_tool_via_mcp_or_rest(tool, params)
+                # Package NPS response into our schema
+                return QuestionResponse(
+                    question=request.question,
+                    answer=json.dumps({"tool": tool, "params": params, "data": data}),
+                    sources=[],
+                    confidence="high",
+                    method_used=f"planner:nps/{tool}",
+                    execution_time=0.0,
+                    timestamp=datetime.now().isoformat(),
+                    profile=get_profile().profile_name,
+                    report_url=None,
+                    report_meta=None,
+                )
+            else:
+                method_to_use = str(plan.get("method", "auto"))
+                logger.info(f"🧭 Planner selected engine method: {method_to_use}")
+                result = engine.answer_question(request.question, method_to_use)
+        else:
+            result = engine.answer_question(request.question, request.method)
         
         # Generate report if requested
         report_url = None
@@ -222,9 +428,9 @@ async def ask_question(request: QuestionRequest, engine: UnifiedQueryEngine = De
                 )
                 report_url = f"/reports/{Path(report_path).name}"
                 report_meta = meta
-                logger.info(f"Report generated: {report_path}")
+                logger.info(f"📄 Report generated: {report_path}")
             except Exception as e:
-                logger.warning(f"Failed to generate report: {e}")
+                logger.warning(f"⚠️ Failed to generate report: {e}")
         
         return QuestionResponse(
             question=result["question"] if "question" in result else request.question,
@@ -240,7 +446,7 @@ async def ask_question(request: QuestionRequest, engine: UnifiedQueryEngine = De
         )
         
     except Exception as e:
-        logger.error(f"Error processing question: {e}")
+        logger.error(f"❌ Error processing question: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing question: {e}")
 
 @app.post("/ask/stream")
@@ -250,7 +456,21 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
     The system will stream the visual summary generation in real-time using Server-Sent Events (SSE).
     """
     try:
-        logger.info(f"Processing streaming question: {request.question} (method: {request.method})")
+        logger.info(f"📡 Processing streaming question: {request.question} (method: {request.method})")
+
+        # If planner is requested, decide route before streaming
+        planned_method = request.method
+        planned_tool: Optional[str] = None
+        planned_params: Dict[str, Any] = {}
+        if request.method == "planner":
+            plan = await asyncio.to_thread(_llm_plan_route, request.question)
+            if plan.get("route_type") == "nps_tool":
+                planned_tool = plan.get("tool")
+                planned_params = plan.get("params", {})
+                logger.info(f"🧭 Planner selected NPS tool (stream): {planned_tool}")
+            else:
+                planned_method = str(plan.get("method", "auto"))
+                logger.info(f"🧭 Planner selected engine method (stream): {planned_method}")
 
         async def event_generator():
             """Generate SSE events for the streaming response."""
@@ -259,21 +479,56 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                 yield f"data: {json.dumps({'event': 'start', 'question': request.question})}\n\n"
 
                 # Step 2: Execute the query (non-streaming part)
-                result = await asyncio.to_thread(
-                    engine.answer_question_partial,
-                    request.question,
-                    request.method
-                )
+                if planned_tool:
+                    data = await _call_nps_tool_via_mcp_or_rest(planned_tool, planned_params)
+                    records = data if isinstance(data, list) else []
+                    df_result = pd.DataFrame(records)
+                    query_spec = {
+                        'question': request.question,
+                        'planner': {
+                            'route_type': 'nps_tool',
+                            'tool': planned_tool,
+                            'params': planned_params,
+                        }
+                    }
+                    profile = get_profile()
+                    response_builder = ResponseBuilder(profile)
+                    result = {
+                        'df_result': df_result,
+                        'query_spec': query_spec,
+                        'response_builder': response_builder,
+                        'method_used': f"planner:nps/{planned_tool}",
+                        'timestamp': datetime.now().isoformat(),
+                        'profile': profile.profile_name,
+                        'confidence': 'high',
+                        'sources': []
+                    }
+                else:
+                    result = await asyncio.to_thread(
+                        engine.answer_question_partial,
+                        request.question,
+                        planned_method
+                    )
 
                 # Step 3: Send the table/preview data immediately (WITHOUT sources to reduce payload)
-                preview_data = {
-                    'event': 'preview',
-                    'confidence': result.get('confidence', 'medium'),
-                    'method_used': result.get('method_used', 'unknown'),
-                    'timestamp': result.get('timestamp', datetime.now().isoformat()),
-                    'profile': result.get('profile', 'unknown'),
-                    'num_sources': len(result.get('sources', []))
-                }
+                if planned_tool:
+                    preview_data = {
+                        'event': 'preview',
+                        'confidence': 'high',
+                        'method_used': f"planner:nps/{planned_tool}",
+                        'timestamp': datetime.now().isoformat(),
+                        'profile': get_profile().profile_name,
+                        'num_sources': 0
+                    }
+                else:
+                    preview_data = {
+                        'event': 'preview',
+                        'confidence': result.get('confidence', 'medium'),
+                        'method_used': result.get('method_used', 'unknown'),
+                        'timestamp': result.get('timestamp', datetime.now().isoformat()),
+                        'profile': result.get('profile', 'unknown'),
+                        'num_sources': len(result.get('sources', []))
+                    }
 
                 # if result.get('table_preview'):
                 #     preview_data['table_preview'] = result['table_preview']
@@ -288,7 +543,7 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
 
                 if df_result is not None and not df_result.empty:
                     # Text2Query path - stream visual summary
-                    yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
+                    yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"  # 🎨 visual summary start
 
                     response_builder = result.get('response_builder')
                     if response_builder:
@@ -300,11 +555,11 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                                 }
                                 yield f"data: {json.dumps(chunk_data)}\n\n"
 
-                    yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
+                    yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"  # 🏁 visual summary end
                     
                 elif rag_agent and rag_question:
                     # RAG path - stream RAG answer
-                    yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
+                    yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"  # 🎤 RAG streaming start
                     
                     # Call RAG streaming method
                     stream_gen, rag_sources, rag_confidence = await rag_agent.answer_question_stream(rag_question)
@@ -322,7 +577,7 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                             }
                             yield f"data: {json.dumps(chunk_data)}\n\n"
                     
-                    yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
+                    yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"  # 🏁 RAG streaming end
                     
                 else:
                     # Fallback - no streaming data available
@@ -360,7 +615,7 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
         )
 
     except Exception as e:
-        logger.error(f"Error processing streaming question: {e}")
+        logger.error(f"❌ Error processing streaming question: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing streaming question: {e}")
 
 @app.post("/search", response_model=SearchResponse)
@@ -379,7 +634,7 @@ async def search_data(request: SearchRequest, engine: UnifiedQueryEngine = Depen
         )
         
     except Exception as e:
-        logger.error(f"Error searching data: {e}")
+        logger.error(f"❌ Error searching data: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching data: {e}")
 
 @app.get("/stats", response_model=StatsResponse)
@@ -389,7 +644,7 @@ async def get_stats(engine: UnifiedQueryEngine = Depends(get_unified_engine)):
         stats = engine.get_stats()
         return StatsResponse(**stats)
     except Exception as e:
-        logger.error(f"Error getting stats: {e}")
+        logger.error(f"❌ Error getting stats: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting stats: {e}")
 
 @app.get("/methods", response_model=MethodResponse)
@@ -403,7 +658,7 @@ async def get_available_methods(engine: UnifiedQueryEngine = Depends(get_unified
             current_profile=stats.get("profile", "unknown")
         )
     except Exception as e:
-        logger.error(f"Error getting methods: {e}")
+        logger.error(f"❌ Error getting methods: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting methods: {e}")
 
 @app.post("/rebuild", response_model=RebuildResponse)
@@ -426,7 +681,7 @@ async def rebuild_rag_index(engine: UnifiedQueryEngine = Depends(get_unified_eng
             )
             
     except Exception as e:
-        logger.error(f"Error rebuilding RAG vector store: {e}")
+        logger.error(f"❌ Error rebuilding RAG vector store: {e}")
         raise HTTPException(status_code=500, detail=f"Error rebuilding RAG vector store: {e}")
 
 @app.get("/reports/{filename}")
@@ -449,7 +704,7 @@ async def get_report(filename: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error serving report: {e}")
+        logger.error(f"❌ Error serving report: {e}")
         raise HTTPException(status_code=500, detail=f"Error serving report: {e}")
 
 @app.get("/profile")
@@ -474,7 +729,7 @@ async def get_profile_info():
             "engines": stats.get("engines", {})
         }
     except Exception as e:
-        logger.error(f"Error getting profile info: {e}")
+        logger.error(f"❌ Error getting profile info: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting profile info: {e}")
 
 # Backward compatibility endpoints

@@ -38,6 +38,7 @@ requests==2.31.0
 
 # MCP (Model Context Protocol)
 mcp>=1.0.0
+fastmcp>=0.0.8
 
 # Testing
 pytest==8.4.1
