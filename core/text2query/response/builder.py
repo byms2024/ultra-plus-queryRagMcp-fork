@@ -206,13 +206,14 @@ class ResponseBuilder:
 
         return None
 
-    def _get_visual_markdown_instruction(self, language_hint: str) -> str:
+    def _get_visual_markdown_instruction(self, language_hint: str, margin_lg: int = 16, margin_sm: int = 8) -> str:
         """Single source of truth for visual markdown instruction to avoid duplication."""
         return (
             "Return a concise plain-Markdown including the final result of the query, without mentioning the query or the data."
-            "Use Markdown tables, numbered or bulleted lists, and emojis to highlight."
-            "Be precise and concise and use H4 titles (####)."
-            "Add single spacing to new lines and double spacing between the title and the content."
+            "Use Markdown tables, numbered or bulleted lists"
+            "Always use emojis to highlight."
+            f"Be precise and concise and use H5 titles (#####), after the title use a margin of {margin_lg}px."
+            f"Use a margin of {margin_sm}px anywhere else in the content."
             "Prefer numerated lists over tables unless the data is very large. Do not return JSON or code fences."
             "Do not include any other text or explanation."
             f"Answer in this language: {language_hint}."
