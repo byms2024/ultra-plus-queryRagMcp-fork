@@ -7,13 +7,14 @@ Integrates with existing profile system and enhanced data cleaning.
 import json
 import time
 import pandas as pd
+import numpy as np
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 from config.logging_config import get_logger
 from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
-from ..utils.time_utils import parse_relative_date_range
+from ..utils.time_utils import parse_relative_date_range, StepTimer
 from ..data import build_schema_description, validate_dataframe_for_langchain
 from config.providers.registry import LLMFactory
 
@@ -36,7 +37,7 @@ class LangChainQuerySynthesizer:
         
         # Enable LangChain mode
         provider_config.use_langchain = True
-        provider_config.langchain_provider = "openai"  # Default to OpenAI for LangChain
+        # provider_config.langchain_provider = "openai"  # Default to OpenAI for LangChain
         
         self.llm_provider = LLMFactory.create(provider_config)
         self.allowed_columns = profile.required_columns
@@ -52,40 +53,38 @@ class LangChainQuerySynthesizer:
         """
         try:
             # Step 1: Build schema context using our enhanced system
-            schema_description = build_schema_description(df, self.profile)
+            with StepTimer(logger, f"[{self.strategy_name}] Build schema description", "🧬"):
+                schema_description = build_schema_description(df, self.profile)
             
             # Step 2: Get profile-specific system prompt and schema hints
-            system_prompt = self._build_system_prompt()
-            schema_hints = self._build_schema_hints(schema_description)
+            with StepTimer(logger, f"[{self.strategy_name}] Build system prompt", "🗒️"):
+                system_prompt = self._build_system_prompt()
+            with StepTimer(logger, f"[{self.strategy_name}] Build schema hints", "🔎"):
+                schema_hints = self._build_schema_hints(schema_description)
             
             # Step 3: Handle date range parsing (integrate existing time utils)
-            date_context = self._handle_date_context(query)
+            with StepTimer(logger, f"[{self.strategy_name}] Parse date context", "📆"):
+                date_context = self._handle_date_context(query)
             
             # Step 4: Build the complete prompt
-            full_prompt = self._build_complete_prompt(
-                query, schema_description, system_prompt, schema_hints, date_context
-            )
+            with StepTimer(logger, f"[{self.strategy_name}] Build complete prompt", "🧩"):
+                full_prompt = self._build_complete_prompt(
+                    query, schema_description, system_prompt, schema_hints, date_context
+                )
             
             # Step 5: Generate pandas code using LangChain
-            logger.info(f"[{self.strategy_name}] 🤖 Calling LLM (LangChain direct synthesis)...")
-            llm_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
-            llm_start = time.time()
-            # Use a minimal timeout wrapper without introducing threads here (LangChain wrappers may support timeouts via client config; fallback to coarse timing)
-            # If provider blocks beyond budget, unified engine budget will also cut it off.
-            response = self.llm_provider.invoke(full_prompt)
-            llm_duration = time.time() - llm_start
-            logger.info(f"[{self.strategy_name}] ✅ LLM response received in {llm_duration:.2f}s")
+            with StepTimer(logger, f"[{self.strategy_name}] LLM call (LangChain)", "🤖"):
+                # Use a minimal timeout wrapper; unified engine also has a budget timeout.
+                response = self.llm_provider.invoke(full_prompt)
             
-            code = self._extract_code_from_response(response)
+            with StepTimer(logger, f"[{self.strategy_name}] Extract generated code", "📝"):
+                code = self._extract_code_from_response(response)
             
             logger.debug(f"Generated pandas code: {code}")
             
             # Step 6: Execute the code safely
-            logger.info(f"[{self.strategy_name}] ⚙️ Executing generated pandas code...")
-            exec_start = time.time()
-            result = self._execute_pandas_code(code, df)
-            exec_duration = time.time() - exec_start
-            logger.info(f"[{self.strategy_name}] ✅ Code execution completed in {exec_duration:.2f}s")
+            with StepTimer(logger, f"[{self.strategy_name}] Execute pandas code", "⚙️"):
+                result = self._execute_pandas_code(code, df)
             
             return result
             
@@ -242,6 +241,7 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
             env = {
                 'df': df,
                 'pd': pd,
+                'np': np,
                 'datetime': datetime,
                 '__builtins__': {
                     'len': len,

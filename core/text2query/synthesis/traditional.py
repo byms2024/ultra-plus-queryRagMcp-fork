@@ -8,7 +8,7 @@ import pandas as pd
 from config.logging_config import get_rag_logger
 from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
-from ..utils.time_utils import parse_relative_date_range
+from ..utils.time_utils import parse_relative_date_range, StepTimer
 from ..data import build_schema_description, validate_dataframe_for_langchain
 from config.providers.registry import LLMFactory
 
@@ -183,37 +183,41 @@ class QuerySynthesizer:
         """
         try:
             # Validate DF for processing (re-using existing helper)
-            validation = validate_dataframe_for_langchain(df, self.profile)
+            with StepTimer(logger, f"[{self.strategy_name}] Validate DataFrame", "🧪"):
+                validation = validate_dataframe_for_langchain(df, self.profile)
             if not validation.get('is_valid', True):
                 logger.warning(f"[{self.strategy_name}] DataFrame validation warnings: {validation.get('errors')}")
 
             # Build prompt
-            schema_description = build_schema_description(df, self.profile)
-            full_prompt = self._build_complete_prompt(question, schema_description)
+            with StepTimer(logger, f"[{self.strategy_name}] Build schema description", "🧬"):
+                schema_description = build_schema_description(df, self.profile)
+            with StepTimer(logger, f"[{self.strategy_name}] Build complete prompt", "🧩"):
+                full_prompt = self._build_complete_prompt(question, schema_description)
 
             # Invoke LLM with timeout using a thread wrapper (to keep parity with prior behavior)
-            logger.info(f"[{self.strategy_name}] 🤖 Calling LLM (direct pandas generation)...")
             llm_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
-            llm_start = time.time()
             try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(self.llm_provider.invoke, full_prompt)
-                    response = future.result(timeout=llm_timeout)
+                with StepTimer(logger, f"[{self.strategy_name}] LLM call (direct pandas)", "🤖"):
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(self.llm_provider.invoke, full_prompt)
+                        response = future.result(timeout=llm_timeout)
             except FuturesTimeoutError:
                 logger.warning(f"[{self.strategy_name}] ⏱️ LLM call timed out after {llm_timeout:.2f}s")
                 return {
                     "error": f"LLM call timed out after {llm_timeout:.2f}s",
                     "query_type": "error",
                 }
-            llm_duration = time.time() - llm_start
-            logger.info(f"[{self.strategy_name}] ✅ LLM response received in {llm_duration:.2f}s")
 
             # Extract code and execute safely
-            code = self._extract_code_from_response(response)
+            with StepTimer(logger, f"[{self.strategy_name}] Extract generated code", "📝"):
+                code = self._extract_code_from_response(response)
             logger.debug(f"[{self.strategy_name}] Generated pandas code: {code}")
-            result_obj = self._execute_pandas_code(code, df)
+            with StepTimer(logger, f"[{self.strategy_name}] Execute pandas code", "⚙️"):
+                result_obj = self._execute_pandas_code(code, df)
 
-            return self._format_result_for_executor(result_obj)
+            with StepTimer(logger, f"[{self.strategy_name}] Format result for executor", "📦"):
+                formatted = self._format_result_for_executor(result_obj)
+            return formatted
 
         except Exception as e:
             logger.error(f"[{self.strategy_name}] ❌ Pandas generation/execution failed: {e}")

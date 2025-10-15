@@ -214,3 +214,42 @@ class BaseProfile(ABC):
             "dealer_column": "DEALER_CODE",
             "repair_type_column": "REPAIR_TYPE_NAME"
         }
+
+    # ------------------------------------------------------------
+    # Language and localization hooks for builders/engines
+    # ------------------------------------------------------------
+    def detect_language(self, question: Optional[str]) -> str:
+        """Detect language for a given question. Default supports EN/PT/ZH."""
+        if not question:
+            return "en"
+        q = (question or "").lower()
+        # Quick CJK detection
+        try:
+            if any('\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf' for ch in question):
+                return "zh"
+        except Exception:
+            pass
+        # Portuguese indicators
+        pt_tokens = [" que ", " como ", " por que", " qual ", " quais ", " são ", " nao ", "não ", " quantos", " média", " soma "]
+        if any(tok in q for tok in pt_tokens) or any(ch in q for ch in "ãõáéíóúçâêô"):
+            return "pt"
+        return "en"
+
+    def localize(self, text_id: str, lang: str) -> str:
+        """Localize small set of default texts. Profiles may override."""
+        catalog = {
+            'no_rows_title_en': 'No matching rows for your request.',
+            'no_rows_title_pt': 'Nenhuma linha correspondente para sua solicitação.',
+            'no_rows_title_zh': '未找到与您的请求匹配的行。',
+            'no_rows_summary_en': 'No matching data was returned for the requested filters.',
+            'no_rows_summary_pt': 'Nenhum dado correspondente foi retornado para os filtros solicitados.',
+            'no_rows_summary_zh': '根据所选筛选条件，没有返回匹配的数据。',
+        }
+        key = f"{text_id}_{'pt' if lang=='pt' else 'en'}"
+        if lang == 'zh':
+            key = f"{text_id}_zh"
+        return catalog.get(key, catalog.get(f"{text_id}_en", ""))
+
+    def get_stats_columns(self) -> Dict[str, str]:
+        """Return a mapping of stat_name -> column for builder stats. Default empty."""
+        return {}

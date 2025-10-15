@@ -11,6 +11,7 @@ import pandas as pd
 from datetime import datetime
 import json
 import asyncio
+import re
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +36,10 @@ logger = get_logger(__name__)
 class QuestionRequest(BaseModel):
     question: str = Field(..., description="The question to ask about the data")
     method: str = Field("auto", description="Query method: 'auto', 'text2query', 'rag', or 'both'")
+    word_by_word: Optional[bool] = Field(
+        False,
+        description="If true, stream output word-by-word (with trailing spaces)"
+    )
 
 class QuestionResponse(BaseModel):
     question: str
@@ -255,6 +260,25 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
         async def event_generator():
             """Generate SSE events for the streaming response."""
             try:
+                max_chunk_chars = 200
+                word_by_word = bool(getattr(request, 'word_by_word', False))
+
+                def iter_word_chunks(text: str):
+                    # Yield words including their following space (if any), preserving spacing
+                    tokens = re.findall(r"\S+|\s+", text)
+                    i = 0
+                    while i < len(tokens):
+                        if tokens[i].isspace():
+                            # Skip leading whitespace; it will be attached to the previous word if any
+                            i += 1
+                            continue
+                        # Non-space token: attach the immediate following whitespace if present
+                        chunk = tokens[i]
+                        if i + 1 < len(tokens) and tokens[i + 1].isspace():
+                            chunk += tokens[i + 1]
+                            i += 1
+                        yield chunk
+                        i += 1
                 # Step 1: Send initial metadata
                 yield f"data: {json.dumps({'event': 'start', 'question': request.question})}\n\n"
 
@@ -289,22 +313,51 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                 if df_result is not None and not df_result.empty:
                     # Text2Query path - stream visual summary
                     yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
+                    # Emit a placeholder so the UI can show a skeleton until first chunk
+                    yield f"data: {json.dumps({'event': 'visual_placeholder'})}\n\n"
 
                     response_builder = result.get('response_builder')
                     if response_builder:
+                        placeholder_removed = False
                         async for chunk in response_builder.generate_visual_summary_stream(df_result, query_spec, request.question):
                             if chunk:
-                                chunk_data = {
-                                    'event': 'visual_chunk',
-                                    'chunk': chunk
-                                }
-                                yield f"data: {json.dumps(chunk_data)}\n\n"
+                                # Remove placeholder on first actual content
+                                if not placeholder_removed:
+                                    yield f"data: {json.dumps({'event': 'visual_placeholder_remove'})}\n\n"
+                                    placeholder_removed = True
+                                if word_by_word:
+                                    for token in iter_word_chunks(chunk):
+                                        chunk_data = {
+                                            'event': 'visual_chunk',
+                                            'chunk': token
+                                        }
+                                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                                elif max_chunk_chars and len(chunk) > max_chunk_chars:
+                                    for i in range(0, len(chunk), max_chunk_chars):
+                                        sub_chunk = chunk[i:i+max_chunk_chars]
+                                        chunk_data = {
+                                            'event': 'visual_chunk',
+                                            'chunk': sub_chunk
+                                        }
+                                        yield f"data: {json.dumps(chunk_data)}\n\n"
+                                else:
+                                    chunk_data = {
+                                        'event': 'visual_chunk',
+                                        'chunk': chunk
+                                    }
+                                    yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                        # Ensure placeholder removal even if no chunks arrived
+                        if not placeholder_removed:
+                            yield f"data: {json.dumps({'event': 'visual_placeholder_remove'})}\n\n"
 
                     yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
                     
                 elif rag_agent and rag_question:
                     # RAG path - stream RAG answer
                     yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
+                    # Emit a placeholder so the UI can show a skeleton until first chunk
+                    yield f"data: {json.dumps({'event': 'visual_placeholder'})}\n\n"
                     
                     # Call RAG streaming method
                     stream_gen, rag_sources, rag_confidence = await rag_agent.answer_question_stream(rag_question)
@@ -314,13 +367,37 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                     result['confidence'] = rag_confidence
                     
                     # Stream RAG response
+                    placeholder_removed = False
                     async for chunk in stream_gen:
                         if chunk:
-                            chunk_data = {
-                                'event': 'visual_chunk',
-                                'chunk': chunk
-                            }
-                            yield f"data: {json.dumps(chunk_data)}\n\n"
+                            # Remove placeholder on first actual content
+                            if not placeholder_removed:
+                                yield f"data: {json.dumps({'event': 'visual_placeholder_remove'})}\n\n"
+                                placeholder_removed = True
+                            if word_by_word:
+                                for token in iter_word_chunks(chunk):
+                                    chunk_data = {
+                                        'event': 'visual_chunk',
+                                        'chunk': token
+                                    }
+                                    yield f"data: {json.dumps(chunk_data)}\n\n"
+                            elif max_chunk_chars and len(chunk) > max_chunk_chars:
+                                for i in range(0, len(chunk), max_chunk_chars):
+                                    sub_chunk = chunk[i:i+max_chunk_chars]
+                                    chunk_data = {
+                                        'event': 'visual_chunk',
+                                        'chunk': sub_chunk
+                                    }
+                                    yield f"data: {json.dumps(chunk_data)}\n\n"
+                            else:
+                                chunk_data = {
+                                    'event': 'visual_chunk',
+                                    'chunk': chunk
+                                }
+                                yield f"data: {json.dumps(chunk_data)}\n\n"
+                    # Ensure placeholder removal even if no chunks arrived
+                    if not placeholder_removed:
+                        yield f"data: {json.dumps({'event': 'visual_placeholder_remove'})}\n\n"
                     
                     yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
                     

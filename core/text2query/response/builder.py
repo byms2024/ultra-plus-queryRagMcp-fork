@@ -48,36 +48,14 @@ class ResponseBuilder:
         return response
     
     def _detect_language_from_question(self, question: Optional[str]) -> str:
-        """Very lightweight language detection for EN/PT; defaults to EN."""
-        if not question:
-            return "en"
-        q = (question or "").lower()
-        # Chinese characters detection (CJK Unified Ideographs and Extension A)
-        try:
-            if any('\u4e00' <= ch <= '\u9fff' or '\u3400' <= ch <= '\u4dbf' for ch in question):
-                return "zh"
-        except Exception:
-            pass
-        # Portuguese indicators
-        pt_tokens = [" que ", " como ", " por que", " qual ", " quais ", " são ", " nao ", "não ", " quantos", " média", " soma "]
-        if any(tok in q for tok in pt_tokens) or any(ch in q for ch in "ãõáéíóúçâêô" ):
-            return "pt"
-        return "en"
+        """Delegate language detection to profile."""
+        detect = getattr(self.profile, 'detect_language', None)
+        return detect(question) if callable(detect) else "en"
 
     def _localize(self, text_id: str, lang: str) -> str:
-        """Return a localized string for small set of defaults."""
-        catalog = {
-            'no_rows_title_en': 'No matching rows for your request.',
-            'no_rows_title_pt': 'Nenhuma linha correspondente para sua solicitação.',
-            'no_rows_title_zh': '未找到与您的请求匹配的行。',
-            'no_rows_summary_en': 'No matching data was returned for the requested filters.',
-            'no_rows_summary_pt': 'Nenhum dado correspondente foi retornado para os filtros solicitados.',
-            'no_rows_summary_zh': '根据所选筛选条件，没有返回匹配的数据。',
-        }
-        key = f"{text_id}_{'pt' if lang=='pt' else 'en'}"
-        if lang == 'zh':
-            key = f"{text_id}_zh"
-        return catalog.get(key, catalog.get(f"{text_id}_en", ""))
+        """Delegate localization to profile."""
+        localize = getattr(self.profile, 'localize', None)
+        return localize(text_id, lang) if callable(localize) else ""
 
     def _build_empty_response(self, query_spec: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Build response when no results are found."""
@@ -101,7 +79,8 @@ class ResponseBuilder:
                     'row_count': 0,
                     'column_names': [],
                     'query_spec': query_spec or {}
-                }
+                },
+                language_hint=lang
             )
             if visual_summary:
                 empty_response['answer'] = visual_summary
@@ -127,10 +106,7 @@ class ResponseBuilder:
 
             config = load_system_config()
             timeout = getattr(config, 'llm_request_timeout_seconds', 60)
-            extras = cloned_config.extras
-            if isinstance(extras, dict):
-                extras.setdefault('temperature', 0.15)
-                extras.setdefault('max_tokens', min(4096, extras.get('max_tokens', 4096)))
+            # Do not set internal defaults; rely on profile/provider config
 
             logger.info("[visual] Initializing visual enrichment LLM")
             llm = LLMFactory.create(cloned_config)
@@ -145,8 +121,8 @@ class ResponseBuilder:
         description = truncated.to_json(orient='split')
         return description, len(df)
 
-    def _construct_visual_prompt(self, df: pd.DataFrame, query_spec: Optional[Dict[str, Any]]) -> str:
-        table_json, total_rows = self._describe_dataframe(df)
+    def _construct_visual_prompt(self, df: pd.DataFrame, query_spec: Optional[Dict[str, Any]], max_rows: int = 20) -> str:
+        table_json, total_rows = self._describe_dataframe(df, max_rows=max_rows)
         columns_meta = []
         for column in df.columns:
             col_data = df[column]
@@ -169,14 +145,19 @@ class ResponseBuilder:
         sanitized_payload = self._sanitize_for_json(prompt_payload)
         return json.dumps(sanitized_payload)
 
-    def _safe_visual_call(self, base_payload: Dict[str, Any]) -> Optional[str]:
+    def _safe_visual_call(self, base_payload: Dict[str, Any], language_hint: Optional[str] = None) -> Optional[str]:
         if not self.visual_llm:
             return None
 
         start_time = time.perf_counter()
         try:
             timeout = getattr(self.visual_llm, '_visual_timeout', 60)
-            instruction = self._get_visual_markdown_instruction()
+            # Require profile-defined visual instruction; do not fallback to internal
+            instruction_provider = getattr(self.profile, 'get_visual_markdown_instruction', None)
+            if not callable(instruction_provider):
+                logger.error("[visual] Missing profile.get_visual_markdown_instruction; skipping visual enrichment")
+                return None
+            instruction = instruction_provider(language_hint or "en")
 
             sanitized_context = self._sanitize_for_json(base_payload)
             payload_dict = {'instruction': instruction, 'context': sanitized_context}
@@ -206,19 +187,7 @@ class ResponseBuilder:
 
         return None
 
-    def _get_visual_markdown_instruction(self, language_hint: str, margin_lg: int = 16, margin_sm: int = 8) -> str:
-        """Single source of truth for visual markdown instruction to avoid duplication."""
-        return (
-            "Return a concise plain-Markdown including the final result of the query, without mentioning the query or the data."
-            "Use Markdown tables, numbered or bulleted lists"
-            "Always use emojis to highlight."
-            f"Be precise and concise and use H5 titles (#####), after the title use a margin of {margin_lg}px."
-            f"Use a margin of {margin_sm}px anywhere else in the content."
-            "Prefer numerated lists over tables unless the data is very large. Do not return JSON or code fences."
-            "Do not include any other text or explanation."
-            f"Answer in this language: {language_hint}."
-            
-        )
+    # Removed internal visual instruction template; profiles must provide get_visual_markdown_instruction
 
     def generate_visual_summary(
         self,
@@ -237,7 +206,12 @@ class ResponseBuilder:
             'query_spec': query_spec or {}
         }
 
-        enriched = self._safe_visual_call(base_payload)
+        # Determine language from question if available
+        lang = None
+        if isinstance(query_spec, dict):
+            lang = self._detect_language_from_question(query_spec.get('question'))
+
+        enriched = self._safe_visual_call(base_payload, language_hint=lang)
         if not enriched:
             return 
 
@@ -266,10 +240,15 @@ class ResponseBuilder:
         start_time = time.perf_counter()
 
         try:
-            prompt = self._construct_visual_prompt(df, query_spec)
+            prompt = self._construct_visual_prompt(df, query_spec, max_rows=8)
 
-            # Use localized instruction that includes language awareness
-            instruction = self._get_visual_markdown_instruction(lang)
+            # Require profile-defined instruction; no internal fallback
+            instruction_provider = getattr(self.profile, 'get_visual_markdown_instruction', None)
+            if not callable(instruction_provider):
+                logger.error("[visual] Missing profile.get_visual_markdown_instruction; streaming disabled")
+                yield "Error: Visual LLM not available."
+                return
+            instruction = instruction_provider(lang)
 
             base_payload = {
                 'prompt': prompt,
@@ -465,33 +444,7 @@ def format_dataframe_for_prompt(df: pd.DataFrame, max_rows: int = 50, max_chars:
     except Exception as e:
         logger.warning(f"Failed to format DataFrame for prompt: {e}")
         return ""
+    # Note: generic create_sources_from_df removed; all source creation must be profile-defined
 
 
-def create_sources_from_df(df: pd.DataFrame, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    DEPRECATED: This function has been moved to profile-specific implementations.
-    Use profile.create_sources_from_df() instead for profile-specific source creation.
-    """
-    logger.warning("create_sources_from_df() standalone function is deprecated. Use profile.create_sources_from_df() instead.")
-    
-    # Fallback generic implementation
-    sources: List[Dict[str, Any]] = []
-    cols = set(df.columns)
-    take = min(limit, len(df))
-    
-    for i in range(take):
-        row = df.iloc[i]
-        source = {}
-        for col in cols:
-            # Generic source creation - just include all columns
-            if pd.notna(row[col]):
-                source[col.lower()] = str(row[col])
-            else:
-                source[col.lower()] = ''
-        sources.append(source)
-    
-    return sources
-
-
-# Backward compatibility alias
-StatsGenerator = ResponseBuilder
+# Backward compatibility alias removed; use ResponseBuilder for stats via its methods

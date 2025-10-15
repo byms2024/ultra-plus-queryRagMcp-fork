@@ -170,15 +170,8 @@ def load_config() -> Config:
     )
 
 def load_profile(config: Config) -> BaseProfile:
-    """Load the appropriate data profile based on configuration."""
-    try:
-        return ProfileFactory.create_profile(config.profile_name)
-    except (ValueError, ImportError) as e:
-        from config.logging_config import get_logger
-        logger = get_logger(__name__)
-        logger.warning(f"Failed to load profile '{config.profile_name}': {e}")
-        logger.info("Falling back to default profile")
-        return ProfileFactory.get_default_profile()
+    """Load the appropriate data profile based on configuration. Strict: no silent fallback."""
+    return ProfileFactory.create_profile(config.profile_name)
 
 def load_system_config() -> SystemConfig:
     """Load system configuration with profile overrides."""
@@ -496,14 +489,18 @@ def get_provider_config(temperature: Optional[float] = None, max_tokens: Optiona
         logger.error(f"Failed to load API key for profile {config.profile_name}: {e}")
         raise ValueError(f"Could not load API key for profile {config.profile_name}")
     
+    # Use passed overrides if provided, otherwise prefer profile/system config values
+    resolved_temperature = temperature if temperature is not None else getattr(config, "temperature", DEFAULT_TEMPERATURE)
+    resolved_max_tokens = max_tokens if max_tokens is not None else getattr(config, "max_tokens", DEFAULT_MAX_TOKENS)
+
     return ProviderConfig(
         provider="google",
         generation_model=config.generation_model,
         embedding_model=config.embedding_model,
         credentials={"api_key": api_key},
         extras={
-            "temperature": temperature or 0.2,  # Profile-specific override (default is 0.1)
-            "max_tokens": max_tokens or 2048,  # Profile-specific override (default is 4000)
+            "temperature": resolved_temperature,
+            "max_tokens": resolved_max_tokens,
             # Timeout and retry behavior for LLM calls
             "timeout": getattr(config, "llm_request_timeout_seconds", 60),
             "max_retries": 0,

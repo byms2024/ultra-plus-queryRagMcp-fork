@@ -7,8 +7,45 @@ import numpy as np
 from datetime import datetime, timedelta
 import logging
 from dataclasses import dataclass
+import time
 
 logger = logging.getLogger(__name__)
+
+class StepTimer:
+    """Context manager to log start/end and duration of a processing step.
+
+    Usage:
+        with StepTimer(logger, "Build prompt", emoji="🧩"):
+            do_work()
+    """
+    def __init__(self, logger: logging.Logger, step_name: str, emoji: str = "⏱️"):
+        self.logger = logger
+        self.step_name = step_name
+        self.emoji = emoji
+        self._start: Optional[float] = None
+
+    def __enter__(self):
+        try:
+            if self.logger:
+                self.logger.info(f"{self.emoji} {self.step_name}...")
+        finally:
+            self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        duration = 0.0 if self._start is None else (time.perf_counter() - self._start)
+        if exc_type is not None:
+            try:
+                self.logger.error(f"❌ {self.step_name} failed after {duration:.2f}s: {exc}")
+            except Exception:
+                pass
+            # Do not suppress exceptions
+            return False
+        try:
+            self.logger.info(f"✅ {self.step_name} completed in {duration:.2f}s")
+        except Exception:
+            pass
+        return False
 
 @dataclass
 class DateConversionResult:

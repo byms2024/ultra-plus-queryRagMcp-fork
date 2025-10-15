@@ -19,7 +19,7 @@ from config.providers.registry import LLMFactory
 from .synthesis import QuerySynthesizer, LangChainQuerySynthesizer, LangChainAgentEngine
 from .execution import QueryExecutor
 from .data import DataManager
-from .response import ResponseBuilder, StatsGenerator
+from .response import ResponseBuilder
 
 logger = get_rag_logger()
 
@@ -49,7 +49,6 @@ class QuerySynthesisEngine:
         # Initialize specialized modules
         self.data_manager = DataManager(config, self.profile)
         self.response_builder = ResponseBuilder(self.profile)
-        self.stats_generator = StatsGenerator(self.profile)
         
         # Initialize synthesis engines
         self.traditional_synthesizer = None

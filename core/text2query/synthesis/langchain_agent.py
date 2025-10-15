@@ -13,6 +13,7 @@ from config.logging_config import get_logger
 from config.base_config import Config, load_system_config
 from config.profiles import DataProfile
 from ..data import build_schema_description, validate_dataframe_for_langchain
+from ..utils.time_utils import StepTimer
 from config.providers.registry import LLMFactory
 
 logger = get_logger(__name__)
@@ -55,7 +56,8 @@ class LangChainAgentEngine:
                 raise RuntimeError("LangChain agent is not available with current provider configuration")
             
             # The agent is already created in the LangChainLLMWrapper
-            agent = self.llm_provider.agent
+            with StepTimer(logger, f"[{self.strategy_name}] Acquire LangChain agent", "🧠"):
+                agent = self.llm_provider.agent
             
             if not agent:
                 raise RuntimeError("Failed to create LangChain agent")
@@ -74,7 +76,8 @@ class LangChainAgentEngine:
         """
         try:
             # Validate DataFrame for LangChain processing
-            validation = validate_dataframe_for_langchain(df, self.profile)
+            with StepTimer(logger, f"[{self.strategy_name}] Validate DataFrame", "🧪"):
+                validation = validate_dataframe_for_langchain(df, self.profile)
             if not validation['is_valid']:
                 logger.warning(f"DataFrame validation failed: {validation['errors']}")
             
@@ -82,16 +85,13 @@ class LangChainAgentEngine:
             agent = self.build_agent(df)
             
             # Build context-aware query
-            context_query = self._build_context_query(query, df)
+            with StepTimer(logger, f"[{self.strategy_name}] Build context query", "🧩"):
+                context_query = self._build_context_query(query, df)
             
             # Run the agent query
-            logger.info(f"[{self.strategy_name}] 🤖 Running LangChain agent query...")
-            agent_timeout = getattr(load_system_config(), "llm_request_timeout_seconds", 60)
-            agent_start = time.time()
-            # Note: Agent.run may block; unified engine also has a budget timeout.
-            result = agent.run(context_query)
-            agent_duration = time.time() - agent_start
-            logger.info(f"[{self.strategy_name}] ✅ Agent query completed in {agent_duration:.2f}s")
+            with StepTimer(logger, f"[{self.strategy_name}] Run agent query", "🤖"):
+                # Note: Agent.run may block; unified engine also has a budget timeout.
+                result = agent.run(context_query)
             
             return str(result)
             

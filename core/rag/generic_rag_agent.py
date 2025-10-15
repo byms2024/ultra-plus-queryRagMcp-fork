@@ -45,21 +45,11 @@ class GenericRAGAgent:
         
         # Initialize LLM and embeddings via provider-agnostic factories
         if provider_config is None:
-            # Resolve from active profile to avoid leaking provider details here
-            try:
-                from config.base_config import PROFILE
-                from config.profiles.profile_factory import ProfileFactory
-                profile = ProfileFactory.create_profile(PROFILE)
-                provider_config = profile.get_provider_config()
-            except Exception:
-                # As a last resort, construct from LangChainConfig values (still generic fields)
-                provider_config = ProviderConfig(
-                    provider="google",  # default only if profile lookup fails
-                    generation_model=self.config.generation_model,
-                    embedding_model=self.config.embedding_model,
-                    credentials={"api_key": self.config.google_api_key},
-                    extras={"temperature": self.config.temperature, "max_tokens": self.config.max_tokens},
-                )
+            # Resolve strictly from active profile; do not fabricate configs
+            from config.base_config import PROFILE
+            from config.profiles.profile_factory import ProfileFactory
+            profile = ProfileFactory.create_profile(PROFILE)
+            provider_config = profile.get_provider_config()
         self.llm = LLMFactory.create(provider_config)
         self.embeddings = EmbeddingsFactory.create(provider_config)
         

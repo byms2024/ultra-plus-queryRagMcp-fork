@@ -20,10 +20,13 @@ class CONSTANTS:
     """Profile-specific configuration constants that override base defaults."""
     
     # LLM Configuration Overrides
-    # GENERATION_MODEL = "gemini-2.5-flash"  # Override default generation model
-    # EMBEDDING_MODEL = "text-embedding-004"  # Override default embedding model
-    # TEMPERATURE = 0.2  # Override default temperature
-    # MAX_TOKENS = 2048  # Override default max tokens
+    # Prefer a fast, low-latency setup for simple queries
+    GENERATION_MODEL = "gemini-2.5-flash"
+    EMBEDDING_MODEL = "text-embedding-004"
+    # Lower temperature to reduce variability and decoding time
+    TEMPERATURE = 0.0
+    # Reduce output tokens to speed up response generation (enough for pandas code)
+    MAX_TOKENS = 512
     
     # Vector Store Configuration Overrides
     # VECTOR_STORE_TYPE = "chroma"  # Override default vector store type (chroma/faiss)
@@ -305,6 +308,26 @@ NPS rules you MUST apply when categorizing or computing metrics:
 
 Available columns: RO_NO, DEALER_CODE, SUB_DEALER_CODE, SCORE, SERVICE_ATTITUDE, ENVIRONMENT, EFFICIENCY, EFFECTIVENESS, PARTS_AVAILABILITY, OTHERS, TROUBLE_DESC, CHECK_RESULT, REPAIR_TYPE_NAME, VIN, CREATE_DATE, OTHERS_REASON
 """
+
+    def get_visual_markdown_instruction(self, language_hint: str, margin_lg: int = 16, margin_sm: int = 8) -> str:
+        """Optional override for visual markdown instruction used by ResponseBuilder."""
+        return (
+            # Estilo e formato
+            "Retorne um Markdown conciso com o resultado final da análise, sem mencionar a consulta nem os dados."
+            "Use listas numeradas ou com marcadores; use tabelas apenas quando essencial."
+            "Sempre use emojis para destacar."
+            f"Seja preciso e conciso e use títulos H5 (#####), após o título use uma margem de {margin_lg}px."
+            f"Use uma margem de {margin_sm}px no restante do conteúdo."
+            "Não retorne JSON nem blocos de código. Não inclua explicações adicionais."
+            f"Responda neste idioma: {language_hint}."
+
+            # Regras específicas para ausência de dados
+            "Regras quando não houver dados ou valores inválidos:"
+            "Se 'row_count' == 0 em context, informe claramente que não há dados para os filtros solicitados."
+            "Sempre que possível, identifique o dealer a partir de 'context.query_spec.filters' (campo 'DEALER_CODE') ou do texto em 'context.query_spec.question' e responda de forma específica, por exemplo: 'Não há dados para este dealer: <DEALER_CODE>'."
+            "Quando a análise resultar em NaN ou quando todas as linhas relevantes estiverem nulas, evite termos técnicos como 'NaN' ou 'undefined'. Prefira dizer: 'Não há dados válidos para cálculo' e, se aplicável, relacione ao dealer."
+            "Não invente valores. Se apropriado, sugira verificar o período, o código do dealer ou os filtros aplicados."
+        )
     
     def create_sources_from_df(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Create sources list from DataFrame for response building."""
@@ -315,7 +338,6 @@ Available columns: RO_NO, DEALER_CODE, SUB_DEALER_CODE, SCORE, SERVICE_ATTITUDE,
                 "metadata": {
                     "ro_no": str(row.get('RO_NO', idx)),
                     "dealer_code": str(row.get('DEALER_CODE', '')),
-                    "score": float(row.get('SCORE', 0)),
                     "service_attitude": str(row.get('SERVICE_ATTITUDE', '')),
                     "environment": str(row.get('ENVIRONMENT', '')),
                     "efficiency": str(row.get('EFFICIENCY', '')),
