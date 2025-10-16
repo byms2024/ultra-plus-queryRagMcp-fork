@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 import pandas as pd
+import numpy as np
 
 from config.logging_config import get_rag_logger
 from config.base_config import Config, load_system_config
@@ -116,6 +117,7 @@ class QuerySynthesizer:
         env = {
             'df': df,
             'pd': pd,
+            'np': np,
             'datetime': datetime,
             '__builtins__': {
                 'len': len,
