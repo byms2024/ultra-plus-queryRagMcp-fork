@@ -19,14 +19,27 @@ from reports.generic_report_builder import ReportConfig
 class CONSTANTS:
     """Profile-specific configuration constants that override base defaults."""
     
-    # LLM Configuration Overrides
-    # Prefer a fast, low-latency setup for simple queries
+    # LLM Configuration Overrides - Optimized for Speed
+    # Use the fastest available model for quick responses
     GENERATION_MODEL = "gemini-2.5-flash"
     EMBEDDING_MODEL = "text-embedding-004"
-    # Lower temperature to reduce variability and decoding time
+    
+    # OPTIMIZATION: Very low temperature for faster token sampling
+    # Lower temperatures require less computation for probability distribution
     TEMPERATURE = 0.0
-    # Reduce output tokens to speed up response generation (enough for pandas code)
-    MAX_TOKENS = 512
+    
+    # OPTIMIZATION: Reduced token limits for faster generation
+    # Visual summaries: 800 tokens (was 512) - allows for better responses while staying fast
+    # Empty responses: 300 tokens - sufficient for helpful explanations
+    MAX_TOKENS = 800
+    
+    # OPTIMIZATION: Faster timeout for quicker failures
+    # Reduce from default 60s to 25s - visual summaries should be fast
+    LLM_REQUEST_TIMEOUT_SECONDS = 25
+    
+    # OPTIMIZATION: Disable retries for faster failure handling
+    # Failed requests should fail fast rather than retry
+    MAX_RETRIES = 0
     
     # Vector Store Configuration Overrides
     # VECTOR_STORE_TYPE = "chroma"  # Override default vector store type (chroma/faiss)
@@ -307,27 +320,74 @@ NPS rules you MUST apply when categorizing or computing metrics:
 - Final NPS value is NOT a percentage.
 
 Available columns: RO_NO, DEALER_CODE, SUB_DEALER_CODE, SCORE, SERVICE_ATTITUDE, ENVIRONMENT, EFFICIENCY, EFFECTIVENESS, PARTS_AVAILABILITY, OTHERS, TROUBLE_DESC, CHECK_RESULT, REPAIR_TYPE_NAME, VIN, CREATE_DATE, OTHERS_REASON
+
+Robust pandas rules you MUST follow to avoid runtime errors:
+- When filtering by date ranges, ensure 'CREATE_DATE' is datetime. If needed, convert with pandas before filtering. Treat start/end as datetimes.
+- Always drop rows with null SCORE before NPS calculations.
+- When computing NPS per group, the result is typically a Series. Name it with .rename('NPS').
+- Sorting:
+  - If sorting a Series, call series.sort_values(ascending=...).
+  - If sorting a DataFrame, ALWAYS pass by='NPS' (or the correct column) to DataFrame.sort_values.
+- Prefer the safe sequence for top-k by group: groupby(...).apply(...).rename('NPS').sort_values(ascending=False).head(k).to_frame().
+- If the filtered DataFrame is empty (no rows for the time window or filters), return an empty result with the expected columns and DO NOT call sort_values on it. Follow the visual markdown rules to communicate absence of data instead of raising exceptions.
+
+MULTI-CRITERIA QUERY HANDLING (CRITICAL):
+For queries with multiple criteria like "recent ROs with lowest scores":
+1. FIRST apply temporal filters (recent = last 30 days unless specified)
+2. THEN apply ranking/sorting (lowest SCORE = ascending=True)
+3. FINALLY apply limits if needed (default to top 10-20 results)
+Example: df[df['CREATE_DATE'] >= recent_cutoff].sort_values('SCORE', ascending=True).head(10)
 """
 
     def get_visual_markdown_instruction(self, language_hint: str, margin_lg: int = 16, margin_sm: int = 8) -> str:
         """Optional override for visual markdown instruction used by ResponseBuilder."""
         return (
-            # Estilo e formato
-            "Retorne um Markdown conciso com o resultado final da análise, sem mencionar a consulta nem os dados."
-            "Use listas numeradas ou com marcadores; use tabelas apenas quando essencial."
-            "Sempre use emojis para destacar."
-            f"Seja preciso e conciso e use títulos H5 (#####), após o título use uma margem de {margin_lg}px."
-            f"Use uma margem de {margin_sm}px no restante do conteúdo."
-            "Não retorne JSON nem blocos de código. Não inclua explicações adicionais."
-            f"Responda neste idioma: {language_hint}."
-
-            # Regras específicas para ausência de dados
-            "Regras quando não houver dados ou valores inválidos:"
-            "Se 'row_count' == 0 em context, informe claramente que não há dados para os filtros solicitados."
-            "Sempre que possível, identifique o dealer a partir de 'context.query_spec.filters' (campo 'DEALER_CODE') ou do texto em 'context.query_spec.question' e responda de forma específica, por exemplo: 'Não há dados para este dealer: <DEALER_CODE>'."
-            "Quando a análise resultar em NaN ou quando todas as linhas relevantes estiverem nulas, evite termos técnicos como 'NaN' ou 'undefined'. Prefira dizer: 'Não há dados válidos para cálculo' e, se aplicável, relacione ao dealer."
-            "Não invente valores. Se apropriado, sugira verificar o período, o código do dealer ou os filtros aplicados."
+            f"""
+            Answer in this language: {language_hint}.
+            Return concise Markdown with the final result that directly addresses the user's question.
+            Focus on what the user wants to see based on their question and the data provided.
+            Use numbered, bulleted lists or tables.
+            Always use emojis to highlight.
+            Be precise and concise and use H5 headings (#####); after the heading use a margin of {margin_lg}px.
+            Use a margin of {margin_sm}px for the rest of the content.
+            Do not return JSON or code blocks. Do not include additional explanations.
+                        """
         )
+    
+    def get_empty_response_instruction(self, language_hint: str) -> str:
+        """
+        OPTIMIZATION: Profile-specific empty response instruction optimized for NPS context and speed.
+        Shorter, more focused instruction for faster processing.
+        """
+        lang_map = {
+            'pt': 'português brasileiro',
+            'pt-BR': 'português brasileiro', 
+            'zh': 'chinês simplificado',
+            'en': 'inglês'
+        }
+        lang_name = lang_map.get(language_hint, 'inglês')
+        
+        return f"""Você é um assistente de dados NPS. Gere uma resposta amigável explicando por que não há resultados.
+
+INSTRUÇÕES RÁPIDAS:
+1. Responda em {lang_name}
+2. Use 1 emoji apropriado
+3. Máximo 3 frases
+4. Mencione filtros específicos se disponíveis (dealer, período, score)
+5. Sugira uma ação alternativa
+6. Use linguagem natural, não técnica
+
+CONTEXTO NPS:
+- Promotores: score 9-10
+- Neutros: score 7-8  
+- Detratores: score 0-6
+
+EXEMPLOS:
+Para "NPS do dealer ABC em janeiro": "📊 Não encontramos dados para o dealer ABC em janeiro. Verifique se o código está correto ou tente um período mais amplo."
+
+Para "promotores com score > 9": "😊 Nenhum cliente encontrado. Lembre-se: promotores têm score 9-10, então score > 9 mostra apenas nota 10. Tente score >= 9."
+
+Agora responda baseado no contexto fornecido."""
     
     def create_sources_from_df(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Create sources list from DataFrame for response building."""

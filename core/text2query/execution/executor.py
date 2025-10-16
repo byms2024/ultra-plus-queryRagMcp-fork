@@ -99,10 +99,10 @@ class QueryExecutor:
 
         # Limit
         try:
-            limit = int(spec.get('limit', 100))
+            limit = int(spec.get('limit', 20))
         except Exception:
-            limit = 100
-        limit = max(1, min(limit, 500))
+            limit = 20
+        limit = max(1, min(limit, 30))
         if isinstance(local, pd.DataFrame):
             local = local.head(limit)
         return cast(pd.DataFrame, local)

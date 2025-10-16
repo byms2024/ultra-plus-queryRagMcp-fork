@@ -310,7 +310,7 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                 rag_agent = result.get('rag_agent')
                 rag_question = result.get('rag_question')
 
-                if df_result is not None and not df_result.empty:
+                if df_result is not None:
                     # Text2Query path - stream visual summary
                     yield f"data: {json.dumps({'event': 'visual_start'})}\n\n"
                     # Emit a placeholder so the UI can show a skeleton until first chunk
@@ -401,13 +401,6 @@ async def ask_question_stream(request: QuestionRequest, engine: UnifiedQueryEngi
                     
                     yield f"data: {json.dumps({'event': 'visual_end'})}\n\n"
                     
-                else:
-                    # Fallback - no streaming data available
-                    answer_data = {
-                        'event': 'answer',
-                        'answer': result.get('answer', 'No results found.')
-                    }
-                    yield f"data: {json.dumps(answer_data)}\n\n"
 
                 # Step 5: Send completion event with final metadata including sources
                 completion_data = {

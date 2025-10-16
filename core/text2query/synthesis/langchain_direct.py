@@ -112,6 +112,17 @@ IMPORTANT INSTRUCTIONS:
 6. If filtering by dates, use proper datetime comparison
 7. Return the result as a pandas DataFrame or Series
 
+MULTI-CRITERIA QUERY HANDLING:
+When a query has multiple criteria (e.g., "recent ROs with lowest scores"), handle them in this order:
+1. FIRST: Apply temporal filters (recent, latest, last month, etc.)
+2. THEN: Apply ranking/sorting (lowest, highest, top, bottom)
+3. FINALLY: Apply limits if needed
+
+For queries like "recent ROs with lowest scores":
+- Filter by date first: df[df['CREATE_DATE'] >= recent_cutoff]
+- Then sort by score: .sort_values('SCORE', ascending=True)
+- Consider limiting results: .head(10) for top results
+
 EXAMPLE OUTPUT FORMAT:
 ```python
 # Your pandas code here
@@ -162,8 +173,20 @@ The query contains relative date references. Use these date ranges:
 - Start Date: {start_date.date()}
 - End Date: {end_date.date()}
 
-When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df['date_column'] <= '{end_date.date()}'
+When filtering by dates, use: df['CREATE_DATE'] >= '{start_date.date()}' and df['CREATE_DATE'] <= '{end_date.date()}'
 """
+            
+            # Handle common temporal terms that might not be parsed by time utils
+            q_lower = query.lower()
+            if any(term in q_lower for term in ['recent', 'latest', 'last']):
+                return f"""
+DATE CONTEXT:
+The query contains temporal references ('recent', 'latest', 'last').
+For 'recent' filter to last 7 days unless specified otherwise:
+- Use: df['CREATE_DATE'] >= (df['CREATE_DATE'].max() - pd.Timedelta(days=7))
+- Or: df['CREATE_DATE'] >= pd.Timestamp.now() - pd.Timedelta(days=7)
+"""
+            
             return ""
         except Exception as e:
             logger.warning(f"Failed to handle date context: {e}")
@@ -172,12 +195,27 @@ When filtering by dates, use: df['date_column'] >= '{start_date.date()}' and df[
     def _build_complete_prompt(self, query: str, schema_description: str, 
                              system_prompt: str, schema_hints: str, date_context: str) -> str:
         """Build the complete prompt for LangChain."""
+        # Add specific guidance for multi-criteria queries
+        multi_criteria_hint = ""
+        q_lower = query.lower()
+        if any(temporal in q_lower for temporal in ['recent', 'latest', 'last']) and \
+           any(ranking in q_lower for ranking in ['lowest', 'highest', 'top', 'bottom', 'best', 'worst']):
+            multi_criteria_hint = """
+MULTI-CRITERIA QUERY DETECTED:
+This query has both temporal and ranking criteria. Follow this sequence:
+1. Filter by date/time first (recent, latest, etc.)
+2. Then sort by the ranking criteria (lowest, highest, etc.)
+3. Limit results if appropriate (head/tail)
+"""
+        
         prompt_parts = [
             system_prompt,
             "",
             schema_hints,
             "",
             date_context,
+            "",
+            multi_criteria_hint,
             "",
             f"USER QUESTION: {query}",
             "",

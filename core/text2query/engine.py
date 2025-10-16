@@ -174,11 +174,11 @@ class QuerySynthesisEngine:
         # Ranking / top-N and ordering indicators (drive aggregation + sorting/limit)
         ranking_tokens = [
             # English
-            "top ", "top", "rank", "ranking", "order by", "most", "least", "number of",
+            "top ", "top", "rank", "ranking", "order by", "most", "least", "lowest", "highest", "recent", "latest", "number of",
             # Portuguese (unaccented due to normalization)
-            "top ", "top", "ranking", "ordenar", "ordenar por", "mais", "menos", "numero de",
+            "top ", "top", "ranking", "ordenar", "ordenar por", "mais", "menos", "menor", "maior", "recente", "ultimo", "numero de",
             # Chinese
-            "前五", "前5", "排名", "排序", "最多", "最少", "数目",
+            "前五", "前5", "排名", "排序", "最多", "最少", "最低", "最高", "最近", "数目",
         ]
 
         if any(tok in q_norm for tok in aggregation_tokens):
