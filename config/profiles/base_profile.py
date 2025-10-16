@@ -229,8 +229,20 @@ class BaseProfile(ABC):
                 return "zh"
         except Exception:
             pass
-        # Portuguese indicators
-        pt_tokens = [" que ", " como ", " por que", " qual ", " quais ", " são ", " nao ", "não ", " quantos", " média", " soma "]
+        # Portuguese indicators - expanded list of common Portuguese words
+        pt_tokens = [
+            # Question words
+            " que ", " como ", " por que", " qual ", " quais ", " quando ", " onde ", " quem ",
+            # Verbs
+            " são ", " está ", " estão ", " tem ", " têm ", " fazer ", " mostrar ", " comparar ",
+            " listar ", " buscar ", " encontrar ", " calcular ", " somar ", " contar ",
+            # Prepositions and conjunctions  
+            " com ", " entre ", " para ", " por ", " de ", " do ", " da ", " dos ", " das ",
+            " em ", " no ", " na ", " nos ", " nas ", " ou ", " mas ", " se ",
+            # Common words
+            " nao ", "não ", " quantos ", " quantas ", " média ", " soma ", " total ",
+            " detalhes ", " dados ", " informações ", " resultados ", " relatório "
+        ]
         if any(tok in q for tok in pt_tokens) or any(ch in q for ch in "ãõáéíóúçâêô"):
             return "pt"
         return "en"

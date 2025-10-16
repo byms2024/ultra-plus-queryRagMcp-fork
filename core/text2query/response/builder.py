@@ -50,7 +50,9 @@ class ResponseBuilder:
     def _detect_language_from_question(self, question: Optional[str]) -> str:
         """Delegate language detection to profile."""
         detect = getattr(self.profile, 'detect_language', None)
-        return detect(question) if callable(detect) else "en"
+        result = detect(question) if callable(detect) else "en"
+        logger.info(f"[language] 🔍 Profile language detection: '{question}' → '{result}'")
+        return result
 
     def _localize(self, text_id: str, lang: str) -> str:
         """Delegate localization to profile."""
@@ -406,7 +408,10 @@ Now generate an appropriate response based on the context provided."""
             if not callable(instruction_provider):
                 logger.error("[visual] Missing profile.get_visual_markdown_instruction; skipping visual enrichment")
                 return None
-            instruction = instruction_provider(language_hint or "en")
+            # Ensure we have a valid language hint
+            final_lang = language_hint or "en"
+            logger.info(f"[visual] 🎯 Using language: '{final_lang}' (hint was: '{language_hint}')")
+            instruction = instruction_provider(final_lang)
 
             sanitized_context = self._sanitize_for_json(base_payload)
             
@@ -470,9 +475,13 @@ Now generate an appropriate response based on the context provided."""
         }
 
         # Determine language from question if available
-        lang = None
+        lang = "en"  # Default fallback
         if isinstance(query_spec, dict):
-            lang = self._detect_language_from_question(query_spec.get('question'))
+            question = query_spec.get('question')
+            logger.info(f"[visual] 🔍 Language detection - query_spec type: {type(query_spec)}, question: '{question}'")
+            if question:  # Only detect if question exists
+                lang = self._detect_language_from_question(question)
+                logger.info(f"[visual] 🌐 Detected language: '{lang}' for question: '{question}'")
 
         enriched = self._safe_visual_call(base_payload, language_hint=lang)
         if not enriched:
